@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v18';
+const CACHE = 'plant-tracker-v19';
 
 const ASSETS = [
   './',
@@ -67,6 +67,57 @@ self.addEventListener('fetch', (event) => {
           return res;
         })
         .catch(() => caches.match('./index.html'));
+    }),
+  );
+});
+
+// ---- Background reminders (no server) -----------------------------------
+
+// The app writes a "reminderDigest" into IndexedDB; we just read it here.
+function idbGetMeta(key) {
+  return new Promise((resolve) => {
+    const req = indexedDB.open('plant-tracker');
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('meta')) { resolve(null); return; }
+      const g = db.transaction('meta', 'readonly').objectStore('meta').get(key);
+      g.onsuccess = () => resolve(g.result ? g.result.value : null);
+      g.onerror = () => resolve(null);
+    };
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function runDailyReminderCheck() {
+  const digest = await idbGetMeta('reminderDigest');
+  if (!digest || !Array.isArray(digest.tasks)) return;
+  const now = Date.now();
+  const due = digest.tasks.filter((t) => new Date(t.due).getTime() <= now);
+  if (!due.length) return;
+  const n = (type) => due.filter((t) => t.type === type).length;
+  const parts = [];
+  if (n('water')) parts.push(`${n('water')} to water`);
+  if (n('fertilize')) parts.push(`${n('fertilize')} to feed`);
+  if (n('photo')) parts.push(`${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
+  if (!parts.length) return;
+  await self.registration.showNotification('🌿 Plant care', {
+    body: `${parts.join(', ')} today.`,
+    tag: 'plant-care-daily',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+  });
+}
+
+self.addEventListener('periodicsync', (event) => {
+  if (event.tag === 'plant-care-check') event.waitUntil(runDailyReminderCheck());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) { if ('focus' in c) return c.focus(); }
+      return self.clients.openWindow ? self.clients.openWindow('./index.html') : undefined;
     }),
   );
 });

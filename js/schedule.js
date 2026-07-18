@@ -20,11 +20,25 @@ export function addDays(date, n) {
   return x;
 }
 
-// The effective (seasonally-adjusted) watering interval for a plant, in days.
-export function effectiveWaterInterval(profile, date, hemisphere) {
+// How this plant's actual pot & spot shift its watering frequency. Terracotta
+// and small pots dry out faster (water more often → shorter interval); large or
+// no-drainage pots and low light hold moisture longer. Unset factors = neutral.
+export function conditionMultiplier(c) {
+  if (!c) return 1;
+  const size = { small: 0.82, medium: 1, large: 1.25 }[c.potSize];
+  const material = { terracotta: 0.82, plastic: 1.1, ceramic: 1.1, metal: 1.12 }[c.potMaterial];
+  const drainage = { yes: 1, no: 1.3 }[c.drainage];
+  const light = { low: 1.25, medium: 1, bright: 0.85 }[c.lightSpot];
+  let m = 1;
+  for (const f of [size, material, drainage, light]) if (f) m *= f;
+  return Math.min(1.8, Math.max(0.55, m)); // clamp so factors can't compound absurdly
+}
+
+// The effective watering interval (days): base × season × pot/spot conditions.
+export function effectiveWaterInterval(profile, date, hemisphere, conditions) {
   const season = seasonForDate(date, hemisphere);
   const mult = wateringMultiplier(season, profile.winterFactor);
-  return Math.max(1, Math.round(profile.water * mult));
+  return Math.max(1, Math.round(profile.water * mult * conditionMultiplier(conditions)));
 }
 
 // The most recent event of a given type for a plant.
@@ -40,7 +54,7 @@ export function lastEvent(events, plantId, type) {
 // Compute watering status for a plant relative to `now`.
 export function waterStatus(plant, events, now, hemisphere) {
   const profile = plant.profile;
-  const interval = effectiveWaterInterval(profile, now, hemisphere);
+  const interval = effectiveWaterInterval(profile, now, hemisphere, plant.conditions);
   const last = lastEvent(events, plant.id, 'water');
   const lastDate = last ? new Date(last.date) : (plant.acquiredDate ? new Date(plant.acquiredDate) : new Date(plant.createdAt));
   const due = addDays(lastDate, interval);

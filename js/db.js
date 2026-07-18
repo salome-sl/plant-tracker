@@ -9,7 +9,7 @@
 // Settings live in localStorage (see settings.js).
 
 const DB_NAME = 'plant-tracker';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let _db = null;
 
@@ -29,6 +29,10 @@ export function openDB() {
       // v2: a library of user-saved (AI looked-up) species.
       if (!db.objectStoreNames.contains('species')) {
         db.createObjectStore('species', { keyPath: 'id' });
+      }
+      // v3: small key/value store for the reminder digest the SW reads.
+      if (!db.objectStoreNames.contains('meta')) {
+        db.createObjectStore('meta', { keyPath: 'key' });
       }
     };
     req.onsuccess = () => { _db = req.result; resolve(_db); };
@@ -111,6 +115,19 @@ export async function putEvent(event) {
 export async function deleteEvent(id) {
   const store = await tx('events', 'readwrite');
   await reqToPromise(store.delete(id));
+}
+
+// ---- Meta (small key/value cache) ---------------------------------------
+
+export async function putMeta(key, value) {
+  const store = await tx('meta', 'readwrite');
+  await reqToPromise(store.put({ key, value }));
+}
+
+export async function getMeta(key) {
+  const store = await tx('meta', 'readonly');
+  const r = await reqToPromise(store.get(key));
+  return r ? r.value : null;
 }
 
 // ---- Custom species library ---------------------------------------------

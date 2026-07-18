@@ -65,6 +65,11 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
 - **Seasonal awareness** — watering intervals automatically stretch in autumn/winter
   (dormancy) and tighten in summer; feeding pauses out of season. Set your
   hemisphere in Settings.
+- **Pot & spot personalization** — tell it each plant's pot size, material
+  (terracotta dries faster than plastic), drainage, and the actual light in its
+  spot, and the watering frequency adjusts accordingly — like Planta, but on-device.
+- **Growth tracking** — log height (and leaf count) over time and see a little
+  chart of the trend alongside the photo progression.
 - **Per-plant schedules** — watering + fertilizing, prefilled from a library of
   common houseplants, fully editable.
 - **Backdate & fix logs** — forgot to log on the day? Use the **📅** button on a
@@ -143,6 +148,13 @@ folder to your host. (Connecting a Git repo is what makes step 3 a one‑liner.)
 and the `CACHE` version in `sw.js`. The service‑worker version change is what
 makes browsers notice a new release — skip it and users keep the old cached
 version. The script keeps the two in sync so you can't forget.
+
+**Reminders without a server:** the app always shows a "what needs care today"
+summary when opened/reopened. On an **installed Android (Chromium) app** it also
+uses the **Periodic Background Sync** API to wake ~once a day and notify you even
+when closed — no cloud needed (the app writes a small "what's due" digest to
+IndexedDB that the service worker reads). iPhone/Safari don't allow background
+reminders without a push server, so there it stays open/reopen only.
 
 **How users get the update:** the installed app checks for a new version when
 it's reopened/focused (and hourly). When one is found it shows a **"🌱 A new

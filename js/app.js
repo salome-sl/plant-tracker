@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.8';
+const APP_VERSION = '1.3.9';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -106,11 +106,27 @@ async function render() {
       window.scrollTo(0, 0);
       await r.handler(...m.slice(1));
       updateNav(hash);
+      refreshReminderState(); // keep the SW's reminder digest fresh (fire-and-forget)
       return;
     }
   }
   clear(app);
   app.append(el('div', { class: 'view' }, 'Not found'));
+}
+
+// Persist a lightweight "what's due" digest that the service worker reads for
+// background reminders (it can't run our seasonal math itself).
+async function refreshReminderState() {
+  try {
+    const settings = getSettings();
+    const now = new Date();
+    const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
+    const tasks = dueTasks(plants, events, now, settings.hemisphere, 0)
+      .map((t) => ({ name: t.plant.name, type: t.type, due: t.due.toISOString() }));
+    const photoDue = plants.filter((p) => photoStatus(p, events, now).due)
+      .map((p) => ({ name: p.name, type: 'photo', due: now.toISOString() }));
+    await db.putMeta('reminderDigest', { tasks: tasks.concat(photoDue), generatedAt: now.toISOString() });
+  } catch { /* ignore */ }
 }
 
 function updateNav(hash) {
@@ -358,6 +374,22 @@ const CAT_LABEL = {
   fern: 'Ferns', orchid: 'Orchids', flowering: 'Flowering', herb: 'Herbs', other: 'Other',
 };
 
+// Human-readable summary of a plant's pot/spot conditions (empty if none set).
+function conditionsSummary(c) {
+  if (!c) return '';
+  const map = {
+    potSize: { small: 'small pot', medium: 'medium pot', large: 'large pot' },
+    potMaterial: { terracotta: 'terracotta', plastic: 'plastic', ceramic: 'glazed ceramic', metal: 'metal' },
+    drainage: { yes: 'good drainage', no: 'no drainage' },
+    lightSpot: { low: 'low light', medium: 'medium light', bright: 'bright light' },
+  };
+  const parts = [];
+  for (const k of ['potSize', 'potMaterial', 'drainage', 'lightSpot']) {
+    if (c[k] && map[k][c[k]]) parts.push(map[k][c[k]]);
+  }
+  return parts.join(' · ');
+}
+
 async function reloadCustomSpecies() {
   try { registerCustomSpecies(await db.getCustomSpecies()); } catch { /* ignore */ }
 }
@@ -454,6 +486,8 @@ route(/^\/plant\/(.+)$/, async (id) => {
     `${SEASON_META[season].emoji} ${SEASON_META[season].label}: `,
     seasonalExplanation(season, plant.profile),
   ]));
+  const condSummary = conditionsSummary(plant.conditions);
+  if (condSummary) view.append(el('div', { class: 'season-inline' }, [`🪴 Personalized for its pot & spot: ${condSummary}`]));
 
   // AI health check — the standout "let me look at your plant" action.
   view.append(el('button', { class: 'ai-cta', onClick: () => openAIDialog(plant) }, [
@@ -561,6 +595,31 @@ route(/^\/plant\/(.+)$/, async (id) => {
   }
   view.append(quickPhotoButton(plant, { className: 'btn btn-secondary full' }));
 
+  // Growth — height over time
+  const heightPts = events
+    .filter((e) => e.type === 'growth' && Number.isFinite(e.height))
+    .map((e) => ({ date: new Date(e.date), value: e.height }))
+    .sort((a, b) => a.date - b.date);
+  view.append(el('h2', { class: 'section-title' }, 'Growth'));
+  if (heightPts.length >= 2) {
+    const first = heightPts[0], last = heightPts[heightPts.length - 1];
+    const change = Math.round((last.value - first.value) * 10) / 10;
+    const minY = Math.min(...heightPts.map((p) => p.value));
+    const maxY = Math.max(...heightPts.map((p) => p.value));
+    view.append(el('div', { class: 'growth-head' }, [
+      el('span', { class: 'growth-latest' }, `${last.value} cm`),
+      el('span', { class: `growth-change ${change >= 0 ? 'up' : 'down'}` },
+        `${change >= 0 ? '▲' : '▼'} ${Math.abs(change)} cm since ${fmtDate(first.date)}`),
+    ]));
+    view.append(growthChart(heightPts));
+    view.append(el('div', { class: 'growth-caption' }, `${minY}–${maxY} cm · ${fmtDate(first.date)} → ${fmtDate(last.date)}`));
+  } else if (heightPts.length === 1) {
+    view.append(el('div', { class: 'muted-box' }, `Latest height: ${heightPts[0].value} cm. Add another measurement to see the trend.`));
+  } else {
+    view.append(el('div', { class: 'muted-box' }, 'Log its height over time to watch it grow.'));
+  }
+  view.append(el('button', { class: 'btn btn-secondary full', onClick: () => openGrowthDialog(plant) }, '📏 Add measurement'));
+
   // History timeline
   view.append(el('h2', { class: 'section-title' }, 'Care history'));
   if (events.length === 0) {
@@ -667,6 +726,7 @@ const EVENT_META = {
   prune: { icon: '✂️', label: 'Pruned' },
   mist: { icon: '💦', label: 'Misted' },
   note: { icon: '📝', label: 'Note' },
+  growth: { icon: '📏', label: 'Measured' },
 };
 
 function timelineRow(e, plant, onChange) {
@@ -1156,6 +1216,56 @@ function photoPicker(state, big = false) {
   return { node };
 }
 
+// Log a growth measurement (height and/or leaf count).
+function openGrowthDialog(plant) {
+  const dateInput = el('input', { type: 'date', value: todayISO(), max: todayISO(), class: 'field' });
+  const heightInput = el('input', { type: 'number', min: '0', step: '0.5', class: 'field', placeholder: 'e.g. 24', inputmode: 'decimal' });
+  const leavesInput = el('input', { type: 'number', min: '0', step: '1', class: 'field', placeholder: 'optional', inputmode: 'numeric' });
+  const notes = el('input', { class: 'field', placeholder: 'Optional note (new leaf, flower bud…)' });
+  const m = modal([
+    el('h3', { class: 'modal-title' }, 'Log a measurement'),
+    labeled('Date', dateInput),
+    labeled('Height (cm)', heightInput),
+    labeled('Leaf count', leavesInput),
+    labeled('Note', notes),
+    el('div', { class: 'modal-actions' }, [
+      el('button', { class: 'btn btn-ghost', onClick: () => m.close() }, 'Cancel'),
+      el('button', { class: 'btn btn-primary', onClick: async () => {
+        const height = heightInput.value !== '' ? +heightInput.value : null;
+        const leaves = leavesInput.value !== '' ? +leavesInput.value : null;
+        if (height == null && leaves == null && !notes.value.trim()) { toast('Enter a height or leaf count'); return; }
+        const bits = [];
+        if (height != null) bits.push(`${height} cm`);
+        if (leaves != null) bits.push(`${leaves} leaves`);
+        const noteStr = [bits.join(' · '), notes.value.trim()].filter(Boolean).join(' — ');
+        await logCare(plant.id, 'growth', dateInput.value, {
+          height: height != null ? height : undefined,
+          leaves: leaves != null ? leaves : undefined,
+          notes: noteStr,
+        });
+        m.close(); toast('Measurement logged'); render();
+      } }, 'Save'),
+    ]),
+  ]);
+}
+
+// Minimal SVG line chart of numeric points over time.
+function growthChart(points) {
+  const W = 320, H = 120, pad = 14;
+  const xs = points.map((p) => p.date.getTime());
+  const ys = points.map((p) => p.value);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const spanX = (maxX - minX) || 1;
+  const spanY = (maxY - minY) || 1;
+  const px = (t) => pad + ((t - minX) / spanX) * (W - pad * 2);
+  const py = (v) => H - pad - ((v - minY) / spanY) * (H - pad * 2);
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${px(p.date.getTime()).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
+  const dots = points.map((p) => `<circle cx="${px(p.date.getTime()).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="3" fill="currentColor"/>`).join('');
+  const svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg"><path d="${d}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>${dots}</svg>`;
+  return el('div', { class: 'growth-chart', html: svg });
+}
+
 // A one-tap camera button that saves a progress/health photo straight to the
 // plant's log (opens the camera directly on phones via `capture`).
 function quickPhotoButton(plant, { className = 'btn btn-secondary full', label = '📷 Add progress photo', stopProp = false } = {}) {
@@ -1216,8 +1326,9 @@ function plantForm(existing) {
     ? JSON.parse(JSON.stringify(existing))
     : {
         id: db.uid('pl'), name: '', speciesId: '', latin: '', location: '', potSize: '',
-        acquiredDate: null, photo: null, profile: { ...DEFAULT_PROFILE }, createdAt: new Date().toISOString(),
+        acquiredDate: null, photo: null, conditions: {}, profile: { ...DEFAULT_PROFILE }, createdAt: new Date().toISOString(),
       };
+  if (!model.conditions) model.conditions = {};
 
   const view = el('div', { class: 'view' });
   view.append(viewHeader(isEdit ? 'Edit plant' : 'Add plant', { back: isEdit ? `/plant/${model.id}` : '/plants' }));
@@ -1357,17 +1468,44 @@ function plantForm(existing) {
   form.append(adv);
   if (isEdit) adv.classList.add('open');
 
-  // Live preview of the effective interval
+  // Pot & spot conditions — personalize the watering frequency.
+  const condOpt = (cur, opts) => {
+    const s = el('select', { class: 'field' });
+    s.append(el('option', { value: '' }, '—'));
+    for (const [v, l] of opts) s.append(el('option', { value: v }, l));
+    s.value = cur || '';
+    return s;
+  };
+  const potSizeSel = condOpt(model.conditions.potSize, [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']]);
+  const potMaterialSel = condOpt(model.conditions.potMaterial, [['terracotta', 'Terracotta / clay'], ['plastic', 'Plastic'], ['ceramic', 'Glazed ceramic'], ['metal', 'Metal']]);
+  const drainageSel = condOpt(model.conditions.drainage, [['yes', 'Has drainage holes'], ['no', 'No drainage']]);
+  const lightSpotSel = condOpt(model.conditions.lightSpot, [['low', 'Low light'], ['medium', 'Medium / bright indirect'], ['bright', 'Bright / direct sun']]);
+  const currentConditions = () => ({
+    potSize: potSizeSel.value || undefined,
+    potMaterial: potMaterialSel.value || undefined,
+    drainage: drainageSel.value || undefined,
+    lightSpot: lightSpotSel.value || undefined,
+  });
+
+  // Live preview of the effective interval (base × season × pot/spot).
   const preview = el('div', { class: 'interval-preview' });
   function refreshPreview() {
     const p = { ...model.profile, water: +waterInput.value || 7, winterFactor: +winterSel.value };
-    const eff = effectiveWaterInterval(p, now, settings.hemisphere);
+    const eff = effectiveWaterInterval(p, now, settings.hemisphere, currentConditions());
     const season = seasonForDate(now, settings.hemisphere);
     clear(preview);
     preview.append(`${SEASON_META[season].emoji} Right now this waters about every ${eff} day${eff === 1 ? '' : 's'}.`);
   }
-  [waterInput, winterSel].forEach((i) => i.addEventListener('input', refreshPreview));
-  advBody.append(preview);
+  [waterInput, winterSel, potSizeSel, potMaterialSel, drainageSel, lightSpotSel].forEach((i) => i.addEventListener('input', refreshPreview));
+  form.append(el('div', { class: 'cond-section' }, [
+    el('h2', { class: 'section-title' }, 'This plant’s pot & spot'),
+    el('div', { class: 'hint bg-hint' }, 'Optional — tailors watering to your actual pot and where it sits (terracotta and small pots dry out faster; low light stays wet longer).'),
+    labeled('Pot size', potSizeSel),
+    labeled('Pot material', potMaterialSel),
+    labeled('Drainage', drainageSel),
+    labeled('Light in its spot', lightSpotSel),
+    preview,
+  ]));
   refreshPreview();
 
   refreshFromSpecies(false);
@@ -1393,8 +1531,8 @@ function plantForm(existing) {
   }
   waterInput.addEventListener('input', refreshWarnings);
   feedInput.addEventListener('input', refreshWarnings);
-  // Runs after refreshFromSpecies has reset the inputs, so picking a species clears warnings.
-  speciesSel.addEventListener('change', () => setTimeout(refreshWarnings, 0));
+  // Runs after refreshFromSpecies has reset the inputs, so the preview + warnings reflect the new species.
+  speciesSel.addEventListener('change', () => setTimeout(() => { refreshWarnings(); refreshPreview(); }, 0));
   form.append(warnBox);
   refreshWarnings();
 
@@ -1458,6 +1596,7 @@ function plantForm(existing) {
       model.profile.winterFactor = +winterSel.value || 1.5;
       model.profile.fertilize = Math.max(0, +feedInput.value || 0);
       model.profile.light = lightSel.value;
+      model.conditions = currentConditions();
       await db.putPlant(model);
       if (!isEdit && lastWateredInput.value) {
         await logCare(model.id, 'water', lastWateredInput.value);
@@ -1669,7 +1808,7 @@ route(/^\/settings$/, async () => {
   } }, settings.notifications && Notification.permission === 'granted' ? '✅ Reminders enabled' : 'Enable reminders');
   view.append(settingsGroup('Reminders', [
     notifBtn,
-    el('div', { class: 'hint' }, 'When enabled, the app notifies you of plants that need care while it’s open (or reopened). For phones, install the app to your home screen first.'),
+    el('div', { class: 'hint' }, 'You’ll always get a “what needs care today” summary when you open or return to the app. On an installed Android app, it can also remind you about once a day in the background (Chrome decides the exact timing). iPhone doesn’t allow background reminders without a server, so there it’s open/reopen only.'),
   ]));
 
   // AI health checks
@@ -1768,6 +1907,20 @@ function applyTheme() {
   else document.documentElement.setAttribute('data-theme', theme);
 }
 
+// Ask the browser to wake the service worker ~daily to show reminders even when
+// the app is closed. Only works on installed PWAs on Chromium (Android Chrome/
+// Edge); silently unsupported elsewhere (iOS/Safari/Firefox) — those rely on the
+// on-open check below.
+async function registerPeriodicSync(reg) {
+  if (!('periodicSync' in reg)) return;
+  try {
+    const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
+    if (status.state === 'granted') {
+      await reg.periodicSync.register('plant-care-check', { minInterval: 24 * 60 * 60 * 1000 });
+    }
+  } catch { /* not supported here */ }
+}
+
 async function checkReminders() {
   const settings = getSettings();
   if (!settings.notifications || !('Notification' in window) || Notification.permission !== 'granted') return;
@@ -1836,6 +1989,8 @@ async function boot() {
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) reg.update().catch(() => {});
       });
+      // Best-effort background reminders (installed Chromium PWAs only).
+      registerPeriodicSync(reg);
     }).catch(() => {});
   }
 }

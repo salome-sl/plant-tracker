@@ -51,7 +51,7 @@ export function welcomeMessage(plant, settings, now = new Date()) {
 
   const season = seasonForDate(now, settings.hemisphere);
   const meta = SEASON_META[season];
-  const interval = effectiveWaterInterval(plant.profile, now, settings.hemisphere);
+  const interval = effectiveWaterInterval(plant.profile, now, settings.hemisphere, plant.conditions);
 
   const light = LIGHT[plant.profile.light] || plant.profile.light;
   const waterLine = `Right now (${meta.label.toLowerCase()}), aim to water about every ${interval} day${interval === 1 ? '' : 's'} — always check that the top of the soil has dried first.`;
@@ -65,7 +65,7 @@ export function careTips(plant, settings, now = new Date()) {
   const s = plant.speciesId ? getSpecies(plant.speciesId) : null;
   const p = plant.profile;
   const season = seasonForDate(now, settings.hemisphere);
-  const interval = effectiveWaterInterval(p, now, settings.hemisphere);
+  const interval = effectiveWaterInterval(p, now, settings.hemisphere, plant.conditions);
   const feeding = shouldFeed(season, p.feedWinter);
   const tips = [];
 
