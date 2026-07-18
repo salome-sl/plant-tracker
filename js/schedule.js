@@ -1,0 +1,141 @@
+// schedule.js — Turns care logs + seasonal rules into due dates and status.
+
+import { wateringMultiplier, shouldFeed, seasonForDate } from './season.js';
+
+export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export function startOfDay(d = new Date()) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+export function daysBetween(a, b) {
+  return Math.round((startOfDay(b) - startOfDay(a)) / MS_PER_DAY);
+}
+
+export function addDays(date, n) {
+  const x = new Date(date);
+  x.setDate(x.getDate() + Math.round(n));
+  return x;
+}
+
+// The effective (seasonally-adjusted) watering interval for a plant, in days.
+export function effectiveWaterInterval(profile, date, hemisphere) {
+  const season = seasonForDate(date, hemisphere);
+  const mult = wateringMultiplier(season, profile.winterFactor);
+  return Math.max(1, Math.round(profile.water * mult));
+}
+
+// The most recent event of a given type for a plant.
+export function lastEvent(events, plantId, type) {
+  let best = null;
+  for (const e of events) {
+    if (e.plantId !== plantId || e.type !== type) continue;
+    if (!best || new Date(e.date) > new Date(best.date)) best = e;
+  }
+  return best;
+}
+
+// Compute watering status for a plant relative to `now`.
+export function waterStatus(plant, events, now, hemisphere) {
+  const profile = plant.profile;
+  const interval = effectiveWaterInterval(profile, now, hemisphere);
+  const last = lastEvent(events, plant.id, 'water');
+  const lastDate = last ? new Date(last.date) : (plant.acquiredDate ? new Date(plant.acquiredDate) : new Date(plant.createdAt));
+  const due = addDays(lastDate, interval);
+  const daysUntil = daysBetween(now, due);
+  return {
+    type: 'water',
+    interval,
+    lastDate,
+    due,
+    daysUntil, // negative = overdue
+    everDone: !!last,
+    state: statusState(daysUntil),
+  };
+}
+
+// Compute fertilizing status. Feeding pauses seasonally.
+export function feedStatus(plant, events, now, hemisphere) {
+  const profile = plant.profile;
+  if (!profile.fertilize) return null; // this plant isn't fed on a schedule
+  const season = seasonForDate(now, hemisphere);
+  const active = shouldFeed(season, profile.feedWinter);
+  const last = lastEvent(events, plant.id, 'fertilize');
+  const lastDate = last ? new Date(last.date) : (plant.acquiredDate ? new Date(plant.acquiredDate) : new Date(plant.createdAt));
+  const due = addDays(lastDate, profile.fertilize);
+  const daysUntil = daysBetween(now, due);
+  return {
+    type: 'fertilize',
+    interval: profile.fertilize,
+    lastDate,
+    due,
+    daysUntil,
+    everDone: !!last,
+    paused: !active,
+    state: active ? statusState(daysUntil) : 'paused',
+  };
+}
+
+function statusState(daysUntil) {
+  if (daysUntil < 0) return 'overdue';
+  if (daysUntil === 0) return 'due';
+  if (daysUntil <= 2) return 'soon';
+  return 'ok';
+}
+
+// Overall health signal for a plant card: worst of its active tasks, plus any
+// recent health note. Returns { level, label }.
+export function overallStatus(plant, events, now, hemisphere) {
+  const w = waterStatus(plant, events, now, hemisphere);
+  const f = feedStatus(plant, events, now, hemisphere);
+  const states = [w.state, f && f.state !== 'paused' ? f.state : null].filter(Boolean);
+
+  // Factor in the latest self-reported health note.
+  const health = lastEvent(events, plant.id, 'health');
+  const healthLevel = health ? health.health : null; // 'good' | 'ok' | 'poor'
+
+  let level = 'good';
+  if (states.includes('overdue') || healthLevel === 'poor') level = 'poor';
+  else if (states.includes('due') || states.includes('soon') || healthLevel === 'ok') level = 'watch';
+
+  const label = { good: 'Healthy', watch: 'Needs attention', poor: 'At risk' }[level];
+  return { level, label, water: w, feed: f, healthNote: health };
+}
+
+// ---- Progress photos ----------------------------------------------------
+
+export const PHOTO_INTERVAL_DAYS = 30;
+
+export function lastPhotoDate(plant, events) {
+  let best = null;
+  for (const e of events) {
+    if (e.plantId !== plant.id || !e.photo) continue;
+    const d = new Date(e.date);
+    if (!best || d > best) best = d;
+  }
+  return best;
+}
+
+// Whether it's time for a fresh progress photo (none in `intervalDays`).
+export function photoStatus(plant, events, now, intervalDays = PHOTO_INTERVAL_DAYS) {
+  const last = lastPhotoDate(plant, events);
+  const baseline = last || (plant.acquiredDate ? new Date(plant.acquiredDate) : new Date(plant.createdAt));
+  const daysSince = daysBetween(baseline, now);
+  return { last, baseline, daysSince, due: daysSince >= intervalDays };
+}
+
+// All tasks due on/before `now` (+ optional look-ahead window), across plants.
+export function dueTasks(plants, events, now, hemisphere, lookAheadDays = 0) {
+  const tasks = [];
+  for (const p of plants) {
+    const w = waterStatus(p, events, now, hemisphere);
+    if (w.daysUntil <= lookAheadDays) tasks.push({ plant: p, ...w });
+    const f = feedStatus(p, events, now, hemisphere);
+    if (f && f.state !== 'paused' && f.daysUntil <= lookAheadDays) tasks.push({ plant: p, ...f });
+  }
+  // Most overdue first.
+  tasks.sort((a, b) => a.daysUntil - b.daysUntil);
+  return tasks;
+}

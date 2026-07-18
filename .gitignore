@@ -1,0 +1,5 @@
+# OS / editor cruft — not part of the app
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
