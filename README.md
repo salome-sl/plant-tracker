@@ -66,7 +66,12 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   (dormancy) and tighten in summer; feeding pauses out of season. Set your
   hemisphere in Settings.
 - **Per-plant schedules** — watering + fertilizing, prefilled from a library of
-  ~26 common houseplants, fully editable.
+  common houseplants, fully editable.
+- **Backdate & fix logs** — forgot to log on the day? Use the **📅** button on a
+  schedule card to log watering/feeding for a past date, or tap any date in the
+  Care history to edit it. The next‑due date recalculates from the real date so
+  the schedule stays accurate. Adding a plant you've had a while? Set **"Last
+  watered"** so its schedule is correct from day one.
 - **Health log & photos** — record condition (thriving / so‑so / struggling),
   notes, and dated photos to watch each plant progress over time.
 - **Progress-photo reminders** — after ~30 days without a photo, the plant (and
@@ -101,10 +106,12 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   history, and the app's assessment) and paste it into your own Claude or ChatGPT
   to keep troubleshooting on your existing subscription. A **Copy photo** button
   puts the plant's picture on your clipboard too, so your AI can see it. The
-  hand‑off instructs that AI to end with a structured `plant-tracker` block; paste
-  its reply back and the app **imports the findings** — updating the schedule and
-  saving a health note. Parsing is done entirely on‑device (no extra API call),
-  and every import is shown as a preview you approve before anything changes.
+  hand‑off instructs that AI to end with a structured `plant-tracker` block. When
+  you're done chatting, a **Copy summary prompt** button gives you a closing prompt
+  to send your AI so it outputs a clean, importable block — paste that back and the
+  app **imports the findings** (updating the schedule and saving a health note).
+  Parsing is done entirely on‑device (no extra API call), and every import is shown
+  as a preview you approve before anything changes.
 - **Reminders** — optional browser notifications while the app is open/reopened.
 - **Backup** — export/import your whole database as a JSON file.
 

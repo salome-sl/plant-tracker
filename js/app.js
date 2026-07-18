@@ -8,14 +8,14 @@ import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings } from './coach.js';
-import { buildHandoff, parseHandoffImport } from './handoff.js';
+import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT } from './handoff.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
 const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.5';
+const APP_VERSION = '1.3.8';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -478,6 +478,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
     last: w.everDone ? fmtDate(w.lastDate) : 'not yet logged',
     due: w.due, daysUntil: w.daysUntil, state: w.state,
     onDo: async () => { await logCare(id, 'water'); toast('Watering logged'); render(); },
+    onDoDated: () => openLogDialog(plant, 'water'),
     doLabel: 'Log watering',
   }));
   if (f) {
@@ -487,6 +488,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
       last: f.everDone ? fmtDate(f.lastDate) : 'not yet logged',
       due: f.due, daysUntil: f.daysUntil, state: f.state, paused: f.state === 'paused',
       onDo: async () => { await logCare(id, 'fertilize'); toast('Feeding logged'); render(); },
+      onDoDated: () => openLogDialog(plant, 'fertilize'),
       doLabel: 'Log feeding',
     }));
   }
@@ -577,7 +579,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
   app.append(view);
 });
 
-function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused, onDo, doLabel }) {
+function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused, onDo, onDoDated, doLabel }) {
   const cls = STATE_CLASS[state] || 'muted';
   const whenText = paused ? 'Paused this season'
     : daysUntil < 0 ? `${-daysUntil} days overdue`
@@ -589,7 +591,47 @@ function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused,
       el('span', { class: `sched-when when-${cls}` }, whenText),
     ]),
     el('div', { class: 'sched-sub' }, `${every} · last: ${last}`),
-    el('button', { class: 'sched-do', onClick: onDo }, doLabel),
+    el('div', { class: 'sched-actions' }, [
+      el('button', { class: 'sched-do', onClick: onDo }, doLabel),
+      onDoDated ? el('button', { class: 'sched-date-btn', title: 'Log on a specific date', onClick: onDoDated }, '📅') : null,
+    ].filter(Boolean)),
+  ]);
+}
+
+// Log a watering/feeding on a chosen date (default today) — for when you forgot
+// to log on the day. Keeping the real date keeps the schedule accurate.
+function openLogDialog(plant, type) {
+  const isWater = type === 'water';
+  const dateInput = el('input', { type: 'date', value: todayISO(), max: todayISO(), class: 'field' });
+  const m = modal([
+    el('h3', { class: 'modal-title' }, isWater ? 'Log watering' : 'Log feeding'),
+    labeled(`When did you ${isWater ? 'water' : 'feed'} it?`, dateInput),
+    el('div', { class: 'hint' }, 'Pick the day it actually happened so your schedule stays accurate.'),
+    el('div', { class: 'modal-actions' }, [
+      el('button', { class: 'btn btn-ghost', onClick: () => m.close() }, 'Cancel'),
+      el('button', { class: 'btn btn-primary', onClick: async () => {
+        await logCare(plant.id, type, dateInput.value);
+        m.close(); toast(isWater ? 'Watering logged' : 'Feeding logged'); render();
+      } }, 'Log'),
+    ]),
+  ]);
+}
+
+// Edit the date of an existing log entry.
+function openEditDateDialog(event) {
+  const meta = EVENT_META[event.type] || { label: event.type };
+  const dateInput = el('input', { type: 'date', value: toDateInputValue(event.date), max: todayISO(), class: 'field' });
+  const m = modal([
+    el('h3', { class: 'modal-title' }, `Edit date — ${meta.label}`),
+    labeled('Date', dateInput),
+    el('div', { class: 'modal-actions' }, [
+      el('button', { class: 'btn btn-ghost', onClick: () => m.close() }, 'Cancel'),
+      el('button', { class: 'btn btn-primary', onClick: async () => {
+        event.date = dateInputToISO(dateInput.value);
+        await db.putEvent(event);
+        m.close(); toast('Date updated'); render();
+      } }, 'Save'),
+    ]),
   ]);
 }
 
@@ -636,7 +678,7 @@ function timelineRow(e, plant, onChange) {
       el('div', { class: 'tl-top' }, [
         el('span', { class: 'tl-label' }, meta.label),
         healthTag,
-        el('span', { class: 'tl-date' }, fmtDate(e.date)),
+        el('button', { class: 'tl-date tl-date-btn', title: 'Edit date', onClick: () => openEditDateDialog(e) }, fmtDate(e.date)),
       ]),
       e.notes ? el('div', { class: 'tl-notes' }, e.notes) : null,
       e.photo ? el('img', { class: 'tl-photo', src: e.photo, alt: 'photo', onClick: () => openImage(e.photo, fmtDate(e.date)) }) : null,
@@ -984,17 +1026,18 @@ async function openHandoffDialog(plant, analysis = null) {
     ]);
   }
 
-  const importArea = el('textarea', { class: 'field', rows: 5, placeholder: 'Paste your AI’s full reply here — it should end with a ```plant-tracker block…' });
+  const summaryPromptBtn = el('button', { class: 'btn btn-secondary full', onClick: async () => {
+    try { await navigator.clipboard.writeText(SUMMARY_PROMPT); toast('Copied — send this to your AI to get the summary'); }
+    catch { toast('Copy failed — long-press to copy the prompt below'); }
+  } }, '📋 Copy summary prompt');
+
+  const importArea = el('textarea', { class: 'field', rows: 5, placeholder: 'Paste your AI’s summary block here…' });
   const importResult = el('div', { class: 'ai-result' });
   const reviewBtn = el('button', { class: 'btn btn-secondary full', onClick: () => {
     clear(importResult);
     const parsed = parseHandoffImport(importArea.value);
     if (!parsed) {
-      importResult.append(el('div', { class: 'ai-error' }, '⚠️ Couldn’t find a structured summary in that reply.'));
-      importResult.append(el('button', { class: 'btn btn-ghost full', onClick: async () => {
-        try { await navigator.clipboard.writeText(REASK_PROMPT); toast('Copied — send this to your AI'); }
-        catch { toast(REASK_PROMPT); }
-      } }, '📋 Copy a reminder to send your AI'));
+      importResult.append(el('div', { class: 'ai-error' }, '⚠️ Couldn’t find a structured summary in that reply. Use “Copy summary prompt” above, send it to your AI, then paste what it gives back.'));
       return;
     }
     renderImportPreview(importResult, parsed, plant, () => m.close());
@@ -1008,6 +1051,8 @@ async function openHandoffDialog(plant, analysis = null) {
     copyBtn,
     photoRow,
     el('div', { class: 'handoff-step' }, '2 · Bring the findings back'),
+    el('div', { class: 'hint' }, 'When you’re done chatting, ask your AI for an importable summary — copy this prompt, send it, then paste back whatever it replies:'),
+    summaryPromptBtn,
     importArea,
     reviewBtn,
     importResult,
@@ -1015,9 +1060,6 @@ async function openHandoffDialog(plant, analysis = null) {
   ].filter(Boolean);
   const m = modal(children);
 }
-
-// Sent to the user's AI if its reply didn't contain a parseable block.
-const REASK_PROMPT = 'Please resend just your findings as a single fenced ```plant-tracker code block of valid JSON — straight quotes, no trailing commas, no comments — using the exact fields from the template I gave you.';
 
 function renderImportPreview(container, parsed, plant, closeDialog) {
   clear(container);
@@ -1273,6 +1315,13 @@ function plantForm(existing) {
   const acquiredInput = el('input', { type: 'date', class: 'field', value: model.acquiredDate ? toDateInputValue(model.acquiredDate) : todayISO() });
   form.append(labeled('Acquired / potted on', acquiredInput));
 
+  // Last watered — so a plant you've had a while starts with an accurate schedule.
+  const lastWateredInput = el('input', { type: 'date', class: 'field', max: todayISO() });
+  if (!isEdit) {
+    form.append(labeled('Last watered (optional)', lastWateredInput));
+    form.append(el('div', { class: 'hint bg-hint' }, 'Had it a while? Set when you last watered it and the schedule will count from there. Leave blank if it’s brand new.'));
+  }
+
   // Advanced schedule (prefilled from species, editable)
   const adv = el('div', { class: 'advanced' });
   const advToggle = el('button', { class: 'advanced-toggle', type: 'button' }, '⚙️ Watering & feeding schedule');
@@ -1410,6 +1459,9 @@ function plantForm(existing) {
       model.profile.fertilize = Math.max(0, +feedInput.value || 0);
       model.profile.light = lightSel.value;
       await db.putPlant(model);
+      if (!isEdit && lastWateredInput.value) {
+        await logCare(model.id, 'water', lastWateredInput.value);
+      }
       toast(isEdit ? 'Plant updated' : 'Plant added');
       navigate(`/plant/${model.id}`);
     } }, isEdit ? 'Save changes' : 'Add plant'),
