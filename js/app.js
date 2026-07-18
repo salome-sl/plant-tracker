@@ -1,6 +1,6 @@
 // app.js — Router, views, and all UI for the Plant Care Tracker.
 
-import { el, clear, fmtDate, fmtRelative, todayISO, toDateInputValue, dateInputToISO, fileToResizedDataURL, download } from './util.js';
+import { el, clear, fmtDate, fmtRelative, todayISO, toDateInputValue, dateInputToISO, fileToResizedDataURL, download, dataUrlToPngBlob } from './util.js';
 import * as db from './db.js';
 import { SPECIES, LIGHT, getSpecies, profileFromSpecies, DEFAULT_PROFILE, allSpecies, isCustomSpecies, registerCustomSpecies } from './species.js';
 import { SYMPTOMS, getSymptom } from './diagnostics.js';
@@ -8,13 +8,14 @@ import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings } from './coach.js';
+import { buildHandoff, parseHandoffImport } from './handoff.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
 const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.2';
+const APP_VERSION = '1.3.5';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -463,6 +464,9 @@ route(/^\/plant\/(.+)$/, async (id) => {
     ]),
     el('span', { class: 'ai-cta-arrow' }, '›'),
   ]));
+  // Free alternative: hand the conversation to your own Claude/ChatGPT.
+  view.append(el('button', { class: 'handoff-link', onClick: () => openHandoffDialog(plant) },
+    '💬 Or continue in your own Claude / ChatGPT (free)'));
 
   // Schedule cards
   const w = st.water;
@@ -793,6 +797,10 @@ async function openAIDialog(plant) {
     placeholder: '📷 Take or choose a photo of your plant',
     onPicked: (d) => { photoState.dataUrl = d; result.replaceChildren(); },
   });
+  const bgInput = el('textarea', {
+    class: 'field', rows: 2,
+    placeholder: 'e.g. just repotted it, moved it to a darker room, leaves started browning last week, I water it weekly…',
+  });
   const analyzeBtn = el('button', { class: 'btn btn-primary full' }, '✨ Analyze this plant');
 
   analyzeBtn.addEventListener('click', async () => {
@@ -811,6 +819,7 @@ async function openAIDialog(plant) {
         season,
         waterBase: plant.profile.water,
         feedBase: plant.profile.fertilize,
+        background: bgInput.value.trim(),
       });
       renderAIResult(result, analysis, plant, photoState.dataUrl, () => m.close());
       analyzeBtn.textContent = '✨ Analyze again';
@@ -829,6 +838,8 @@ async function openAIDialog(plant) {
   const m = modal([
     el('h3', { class: 'modal-title' }, '✨ AI health check'),
     pf.node,
+    labeled('Anything I should know? (optional)', bgInput),
+    el('div', { class: 'hint bg-hint' }, 'The more context you give — recent changes, symptoms, how you water it — the better the read. You can add more and tap “Analyze again”.'),
     analyzeBtn,
     result,
     el('button', { class: 'btn btn-ghost full', onClick: () => m.close() }, 'Close'),
@@ -919,6 +930,149 @@ function renderAIResult(container, a, plant, photo, closeDialog) {
     closeDialog();
     render();
   } }, '💾 Save this to the health log'));
+
+  // Continue the conversation for free in your own Claude/ChatGPT.
+  container.append(el('button', { class: 'btn btn-ghost full', onClick: () => { closeDialog(); openHandoffDialog(plant, a); } }, '💬 Continue this in your own AI'));
+}
+
+// Hand off everything about a plant to the user's own Claude/ChatGPT, and import
+// findings back — a zero-API-cost way to keep the conversation going.
+async function openHandoffDialog(plant, analysis = null) {
+  const settings = getSettings();
+  const events = await db.getEvents(plant.id);
+  const text = buildHandoff({ plant, events, settings, analysis });
+
+  const photoDataUrl = plant.photo || (events.find((e) => e.photo) || {}).photo || null;
+
+  const exportArea = el('textarea', { class: 'field handoff-text', rows: 7, readonly: 'readonly', spellcheck: 'false' });
+  exportArea.value = text;
+  const copyBtn = el('button', { class: 'btn btn-primary full', onClick: async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast('Copied — paste it into Claude or ChatGPT');
+    } catch {
+      exportArea.focus(); exportArea.select();
+      toast('Select all, then copy (Ctrl/Cmd+C)');
+    }
+  } }, '📋 Copy hand-off');
+
+  // Optional: copy the plant photo too, so the AI can see it.
+  let photoRow = null;
+  if (photoDataUrl) {
+    photoRow = el('div', { class: 'handoff-photo' }, [
+      el('img', { src: photoDataUrl, alt: 'plant photo' }),
+      el('div', { class: 'handoff-photo-side' }, [
+        el('button', { class: 'btn btn-secondary full', onClick: async () => {
+          try {
+            const blob = await dataUrlToPngBlob(photoDataUrl);
+            if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+              await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+              toast('Photo copied — paste it into your AI');
+              return;
+            }
+            if (navigator.canShare) {
+              const file = new File([blob], 'plant.png', { type: 'image/png' });
+              if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
+            }
+            throw new Error('unsupported');
+          } catch {
+            toast('Press and hold the photo to copy it');
+          }
+        } }, '📷 Copy photo'),
+        el('div', { class: 'hint' }, 'Paste the text into your AI, then paste the photo as your next message so it can see the plant.'),
+      ]),
+    ]);
+  }
+
+  const importArea = el('textarea', { class: 'field', rows: 5, placeholder: 'Paste your AI’s full reply here — it should end with a ```plant-tracker block…' });
+  const importResult = el('div', { class: 'ai-result' });
+  const reviewBtn = el('button', { class: 'btn btn-secondary full', onClick: () => {
+    clear(importResult);
+    const parsed = parseHandoffImport(importArea.value);
+    if (!parsed) {
+      importResult.append(el('div', { class: 'ai-error' }, '⚠️ Couldn’t find a structured summary in that reply.'));
+      importResult.append(el('button', { class: 'btn btn-ghost full', onClick: async () => {
+        try { await navigator.clipboard.writeText(REASK_PROMPT); toast('Copied — send this to your AI'); }
+        catch { toast(REASK_PROMPT); }
+      } }, '📋 Copy a reminder to send your AI'));
+      return;
+    }
+    renderImportPreview(importResult, parsed, plant, () => m.close());
+  } }, 'Review findings');
+
+  const children = [
+    el('h3', { class: 'modal-title' }, '💬 Continue in your own AI'),
+    el('div', { class: 'hint' }, 'Paste this hand-off into Claude or ChatGPT to keep troubleshooting for free — it includes everything about this plant. When you’re done, paste the reply back below to import any changes.'),
+    el('div', { class: 'handoff-step' }, '1 · Copy & paste into your AI'),
+    exportArea,
+    copyBtn,
+    photoRow,
+    el('div', { class: 'handoff-step' }, '2 · Bring the findings back'),
+    importArea,
+    reviewBtn,
+    importResult,
+    el('button', { class: 'btn btn-ghost full', onClick: () => m.close() }, 'Close'),
+  ].filter(Boolean);
+  const m = modal(children);
+}
+
+// Sent to the user's AI if its reply didn't contain a parseable block.
+const REASK_PROMPT = 'Please resend just your findings as a single fenced ```plant-tracker code block of valid JSON — straight quotes, no trailing commas, no comments — using the exact fields from the template I gave you.';
+
+function renderImportPreview(container, parsed, plant, closeDialog) {
+  clear(container);
+  const level = CONDITION_LEVEL[parsed.condition] || 'watch';
+  const bubble = el('div', { class: 'ai-bubble' }, [
+    parsed.condition ? el('div', { class: 'ai-bubble-top' }, [statusPill(level, cap(parsed.condition))]) : null,
+    parsed.summary ? el('div', { class: 'ai-headline' }, parsed.summary) : null,
+    parsed.assessment ? el('div', { class: 'ai-assessment' }, parsed.assessment) : null,
+  ].filter(Boolean));
+  if (parsed.next_steps.length) {
+    bubble.append(el('div', { class: 'ai-sub' }, 'Next steps'));
+    bubble.append(el('ol', { class: 'ai-list ai-steps' }, parsed.next_steps.map((sp) => el('li', {}, sp))));
+  }
+  container.append(bubble);
+
+  const cc = parsed.care_changes;
+  const changes = [];
+  if (Number.isInteger(cc.water_interval_days) && cc.water_interval_days > 0 && cc.water_interval_days !== plant.profile.water) {
+    changes.push({ kind: 'water', to: cc.water_interval_days, from: plant.profile.water });
+  }
+  if (Number.isInteger(cc.fertilize_interval_days) && cc.fertilize_interval_days >= 0 && cc.fertilize_interval_days !== plant.profile.fertilize) {
+    changes.push({ kind: 'feed', to: cc.fertilize_interval_days, from: plant.profile.fertilize });
+  }
+  if (cc.light && cc.light !== plant.profile.light) {
+    changes.push({ kind: 'light', to: cc.light, from: plant.profile.light });
+  }
+
+  if (changes.length) {
+    const label = (c) =>
+      c.kind === 'water' ? `💧 Water every ${c.to} day${c.to === 1 ? '' : 's'} (was ${c.from})`
+      : c.kind === 'feed' ? (c.to ? `🌱 Feed every ${c.to} days (was ${c.from || 'never'})` : '🌱 Stop scheduled feeding')
+      : `☀️ Light: ${LIGHT[c.to] || c.to}`;
+    container.append(el('div', { class: 'apply-card' }, [
+      el('div', { class: 'apply-head' }, '✨ Changes from your conversation'),
+      cc.reason ? el('div', { class: 'apply-summary' }, cc.reason) : null,
+      el('ul', { class: 'apply-list' }, changes.map((c) => el('li', {}, label(c)))),
+    ].filter(Boolean)));
+  }
+
+  const applyBtn = el('button', { class: 'btn btn-primary full', onClick: async () => {
+    applyBtn.disabled = true;
+    let profileChanged = false;
+    for (const c of changes) {
+      if (c.kind === 'water') { plant.profile.water = c.to; profileChanged = true; }
+      else if (c.kind === 'feed') { plant.profile.fertilize = c.to; profileChanged = true; }
+      else if (c.kind === 'light') { plant.profile.light = c.to; profileChanged = true; }
+    }
+    if (profileChanged) await db.putPlant(plant);
+    const notes = [parsed.summary, parsed.assessment, parsed.log_note].filter(Boolean).join(' — ') || 'Imported from my AI conversation';
+    await logCare(plant.id, 'health', todayISO(), { health: parsed.condition || undefined, notes });
+    toast(changes.length ? 'Imported — schedule updated & saved to log' : 'Imported to health log');
+    closeDialog();
+    render();
+  } }, changes.length ? 'Apply & save to log' : 'Save to health log');
+  container.append(applyBtn);
 }
 
 // Reusable photo input with BOTH a "Take photo" (opens the camera on phones via

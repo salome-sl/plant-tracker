@@ -90,10 +90,21 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   form shows a gentle warning with a one‑tap "use recommended". It only warns —
   it never overrides your choice.
 - **✨ AI health check** — show Claude a photo and get a genuine, conversational
-  read on the plant's condition plus next steps. If it spots over/under-watering
-  it offers a **one-tap "Apply changes"** that updates the plant's watering or
-  feeding schedule for you. Save the read to the health log too. Optional; see
-  *AI health checks* below.
+  read on the plant's condition plus next steps. Add **background context** ("just
+  repotted", "moved to a darker room", "leaves browning since last week") so the
+  assessment accounts for it, and tap **Analyze again** to refine. If it spots
+  over/under-watering it offers a **one-tap "Apply changes"** that updates the
+  plant's schedule. Save the read to the health log too. Optional; see *AI health
+  checks* below.
+- **💬 Continue in your own AI (free)** — instead of paying per API call for a
+  back‑and‑forth, copy an all‑encompassing **hand‑off** (the plant's full profile,
+  history, and the app's assessment) and paste it into your own Claude or ChatGPT
+  to keep troubleshooting on your existing subscription. A **Copy photo** button
+  puts the plant's picture on your clipboard too, so your AI can see it. The
+  hand‑off instructs that AI to end with a structured `plant-tracker` block; paste
+  its reply back and the app **imports the findings** — updating the schedule and
+  saving a health note. Parsing is done entirely on‑device (no extra API call),
+  and every import is shown as a preview you approve before anything changes.
 - **Reminders** — optional browser notifications while the app is open/reopened.
 - **Backup** — export/import your whole database as a JSON file.
 

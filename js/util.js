@@ -96,6 +96,23 @@ export function fileToResizedDataURL(file, maxDim = 900, quality = 0.72) {
   });
 }
 
+// Convert a (JPEG) data URL to a PNG Blob — needed to put an image on the
+// clipboard (the Clipboard API only reliably accepts image/png).
+export function dataUrlToPngBlob(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext('2d').drawImage(img, 0, 0);
+      c.toBlob((b) => (b ? resolve(b) : reject(new Error('blob failed'))), 'image/png');
+    };
+    img.onerror = () => reject(new Error('image load failed'));
+    img.src = dataUrl;
+  });
+}
+
 export function download(filename, text) {
   const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);

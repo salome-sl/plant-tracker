@@ -75,6 +75,7 @@ You will be shown a photo of a houseplant and told the current season. Assess th
 Voice and style:
 - Talk like a real person. Second person ("your plant", "you'll want to..."). Warm and reassuring, but honest if something looks off.
 - Be specific about what you actually see in the photo — leaf color, drooping, spots, new growth, soil, the pot.
+- If the owner gives background (recent repotting, a move, a change in light or watering, symptoms and when they started), treat it as key evidence — it can change your diagnosis. Acknowledge it and connect your assessment to it.
 - If it's a new/healthy plant, celebrate it ("great pick", "looking really healthy").
 - Keep it concise. No markdown, no headings, no emoji in your text fields.
 
@@ -176,8 +177,10 @@ export async function analyzePlant(dataUrl, context = {}) {
   if (Number.isFinite(context.feedBase) && context.feedBase > 0) {
     bits.push(`I feed it every ${context.feedBase} days.`);
   }
+  const bg = (context.background || '').trim();
+  const bgLine = bg ? `\n\nImportant background from me (weigh this heavily — it may change your read): ${bg}` : '';
   const userText =
-    `Here's a photo of my houseplant. ${bits.join(' ')} How does it look, and what should I do to keep it healthy?`.trim();
+    `Here's a photo of my houseplant. ${bits.join(' ')} How does it look, and what should I do to keep it healthy?${bgLine}`.trim();
 
   return callAnthropic({
     system: SYSTEM_PROMPT,
