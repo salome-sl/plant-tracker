@@ -379,6 +379,18 @@ label.btn.full { display: block; width: 100%; }
 .cause-signs, .cause-fix { font-size: 13.5px; line-height: 1.5; margin-top: 4px; }
 .cause-signs { color: var(--text-dim); }
 
+/* Per-plant troubleshooting */
+.diagnose-plant { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.diagnose-plant-emoji { font-size: 34px; }
+.diagnose-plant-name { font-weight: 700; font-size: 16px; }
+.diagnose-lead { background: var(--surface-2); border-radius: 12px; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; margin-bottom: 14px; }
+.guide-chevron { color: var(--text-dim); font-size: 20px; margin-left: auto; padding-left: 8px; }
+.cause-rel { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-left: auto; white-space: nowrap; }
+.cause-rel.high { background: rgba(46, 160, 67, 0.16); color: var(--green); }
+.cause-rel.low { background: var(--surface-2); color: var(--text-dim); }
+.cause-card.rel-low { opacity: 0.72; }
+.cause-card.rel-high { border-left: 3px solid var(--green); }
+
 /* Settings */
 .settings-group { margin-bottom: 8px; }
 .settings-group .btn { margin-bottom: 8px; }

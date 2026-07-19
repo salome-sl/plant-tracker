@@ -3,7 +3,7 @@
 import { el, clear, fmtDate, fmtRelative, todayISO, toDateInputValue, dateInputToISO, fileToResizedDataURL, download, dataUrlToPngBlob } from './util.js';
 import * as db from './db.js';
 import { SPECIES, LIGHT, getSpecies, profileFromSpecies, DEFAULT_PROFILE, allSpecies, isCustomSpecies, registerCustomSpecies } from './species.js';
-import { SYMPTOMS, getSymptom } from './diagnostics.js';
+import { SYMPTOMS, getSymptom, tailorCauses, CATEGORY_LEAD, CATEGORY_NOUN } from './diagnostics.js';
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, MS_PER_DAY } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.16';
+const APP_VERSION = '1.3.17';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -619,6 +619,10 @@ route(/^\/plant\/(.+)$/, async (id) => {
   // Free alternative: hand the conversation to your own Claude/ChatGPT.
   view.append(el('button', { class: 'handoff-link', onClick: () => openHandoffDialog(plant) },
     '💬 Or continue in your own Claude / ChatGPT (free)'));
+  // Symptom troubleshooter, tailored to this plant.
+  view.append(el('button', { class: 'handoff-link', onClick: () =>
+    navigate(plant.speciesId && getSpecies(plant.speciesId) ? `/diagnose/${plant.speciesId}` : '/diagnose') },
+    '🔍 Troubleshoot a symptom (yellow leaves, pests…)'));
 
   // Schedule cards
   const w = st.water;
@@ -1907,6 +1911,8 @@ function winterWords(f) {
   return 'Only slightly less';
 }
 
+// Step 1 — pick which plant you're troubleshooting. Diagnosis is tailored to the
+// chosen plant's category, so there's no generic "all plants" list.
 route(/^\/diagnose$/, () => {
   const view = el('div', { class: 'view' });
   view.append(viewHeader('Troubleshoot'));
@@ -1914,31 +1920,92 @@ route(/^\/diagnose$/, () => {
     el('button', { class: 'guide-tab', onClick: () => navigate('/guide') }, 'Plants'),
     el('button', { class: 'guide-tab active' }, 'Troubleshoot'),
   ]));
-  view.append(el('p', { class: 'diagnose-intro' }, "What's wrong with your plant? Pick the symptom you see."));
+  view.append(el('p', { class: 'diagnose-intro' }, 'Which plant are you worried about? Pick it and the advice is tailored to that plant.'));
+
+  const search = el('input', { class: 'field search', placeholder: '🔍 Search plants…' });
+  view.append(search);
+
+  const list = el('div', { class: 'guide-list' });
+  function draw(filter = '') {
+    clear(list);
+    const q = filter.toLowerCase();
+    allSpecies().filter((s) =>
+      s.name.toLowerCase().includes(q) ||
+      (s.latin || '').toLowerCase().includes(q) ||
+      (s.aka || []).some((a) => a.toLowerCase().includes(q)),
+    ).forEach((s) => {
+      list.append(el('div', { class: 'guide-row', onClick: () => navigate(`/diagnose/${s.id}`) }, [
+        el('span', { class: 'guide-emoji' }, categoryEmoji(s.category)),
+        el('div', { class: 'guide-row-main' }, [
+          el('div', { class: 'guide-name' }, s.name),
+          el('div', { class: 'guide-latin' }, s.latin),
+        ]),
+        el('span', { class: 'guide-chevron' }, '›'),
+      ]));
+    });
+    if (!list.children.length) list.append(el('div', { class: 'muted-box' }, 'No matches.'));
+  }
+  search.addEventListener('input', () => draw(search.value));
+  draw();
+  view.append(list);
+  app.append(view);
+});
+
+// Step 2 — with a plant chosen, show the symptoms, led by that plant's biggest risk.
+route(/^\/diagnose\/([^/]+)$/, (speciesId) => {
+  const s = getSpecies(speciesId);
+  if (!s) { navigate('/diagnose'); return; }
+  const view = el('div', { class: 'view' });
+  view.append(viewHeader(s.name, { back: '/diagnose' }));
+  view.append(el('div', { class: 'diagnose-plant' }, [
+    el('span', { class: 'diagnose-plant-emoji' }, categoryEmoji(s.category)),
+    el('div', {}, [
+      el('div', { class: 'diagnose-plant-name' }, `Troubleshooting your ${s.name}`),
+      s.latin ? el('div', { class: 'guide-latin' }, s.latin) : null,
+    ]),
+  ]));
+  const lead = CATEGORY_LEAD[s.category];
+  if (lead) view.append(el('div', { class: 'diagnose-lead' }, ['💡 ', lead]));
+  view.append(el('p', { class: 'diagnose-intro' }, 'What are you seeing?'));
   const grid = el('div', { class: 'symptom-grid' });
-  SYMPTOMS.forEach((s) => {
-    grid.append(el('button', { class: 'symptom-card', onClick: () => navigate(`/diagnose/${s.id}`) }, [
-      el('span', { class: 'symptom-emoji' }, s.emoji),
-      el('span', { class: 'symptom-title' }, s.title),
+  SYMPTOMS.forEach((sym) => {
+    grid.append(el('button', { class: 'symptom-card', onClick: () => navigate(`/diagnose/${s.id}/${sym.id}`) }, [
+      el('span', { class: 'symptom-emoji' }, sym.emoji),
+      el('span', { class: 'symptom-title' }, sym.title),
     ]));
   });
   view.append(grid);
   app.append(view);
 });
 
-route(/^\/diagnose\/(.+)$/, (id) => {
-  const s = getSymptom(id);
+// Step 3 — the causes, re-ranked for this plant's category with relevance chips.
+route(/^\/diagnose\/([^/]+)\/([^/]+)$/, (speciesId, symptomId) => {
+  const s = getSpecies(speciesId);
+  const sym = getSymptom(symptomId);
   if (!s) { navigate('/diagnose'); return; }
+  if (!sym) { navigate(`/diagnose/${speciesId}`); return; }
   const view = el('div', { class: 'view' });
-  view.append(viewHeader(s.title, { back: '/diagnose' }));
-  view.append(el('div', { class: 'diagnose-head' }, [el('span', { class: 'diagnose-emoji' }, s.emoji), 'Likely causes, most common first:']));
-  s.causes.forEach((c, i) => {
-    view.append(el('div', { class: 'cause-card' }, [
-      el('div', { class: 'cause-name' }, [el('span', { class: 'cause-num' }, String(i + 1)), c.name]),
+  view.append(viewHeader(sym.title, { back: `/diagnose/${speciesId}` }));
+  view.append(el('div', { class: 'diagnose-head' }, [
+    el('span', { class: 'diagnose-emoji' }, sym.emoji),
+    `On your ${s.name}, most likely first:`,
+  ]));
+  const noun = CATEGORY_NOUN[s.category] || 'plant';
+  tailorCauses(sym, s.category).forEach((c, i) => {
+    const card = el('div', { class: `cause-card rel-${c.relevance}` }, [
+      el('div', { class: 'cause-name' }, [
+        el('span', { class: 'cause-num' }, String(i + 1)),
+        c.name,
+        c.relevance === 'high' ? el('span', { class: 'cause-rel high' }, `likely for a ${noun}`) : null,
+        c.relevance === 'low' ? el('span', { class: 'cause-rel low' }, `unusual for a ${noun}`) : null,
+      ]),
       el('div', { class: 'cause-signs' }, [el('b', {}, 'Signs: '), c.signs]),
       el('div', { class: 'cause-fix' }, [el('b', {}, 'What to do: '), c.fix]),
-    ]));
+    ]);
+    view.append(card);
   });
+  // Tie the plant's own care note in — it's the highest-signal, species-specific bit.
+  if (s.tips) view.append(el('div', { class: 'tips-box' }, [`💡 For your ${s.name}: `, s.tips]));
   app.append(view);
 });
 

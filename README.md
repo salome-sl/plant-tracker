@@ -97,8 +97,15 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   progression automatically.
 - **Care guide** — light, water, humidity, temperature, soil, toxicity and tips
   for each species.
-- **Troubleshoot** — pick a symptom (yellow leaves, brown tips, drooping, pests…)
-  for likely causes, ordered most‑common‑first, and what to do.
+- **Troubleshoot (per plant)** — pick the plant you're worried about, then a
+  symptom (yellow leaves, brown tips, drooping, pests…), and the likely causes
+  are **re‑ranked for that plant**: the same symptom means different things on
+  different plants, so drooping leads with "overwatered" on a succulent but
+  "thirsty" on a fern, and each cause is tagged *likely* / *unusual* for that
+  plant type. The page opens with the plant's biggest risk up front and its own
+  care note at the end. Works for any custom/AI‑added plant too (it tailors by
+  the plant's category). You can also jump straight in from a plant's page via
+  **🔍 Troubleshoot a symptom**.
 - **Care coach** — a warm, plain‑language "great choice, here's how to keep it
   thriving" write‑up for every plant, generated on‑device from its species and
   the current season.
