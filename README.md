@@ -87,7 +87,11 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   (watering, feeding, light, humidity, soil, toxicity, tips) via AI and fills the
   form for you. Looked-up species are **saved to your library** — they appear in
   the species dropdown and the Care Guide (tagged "Saved") for reuse, and are
-  included in your backups. Remove one from its Care Guide page.
+  included in your backups. Remove one from its Care Guide page. If the app
+  identifies a plant it doesn't have, it says so and offers to fetch the care
+  info **either via the API or by pasting a prompt into your own Claude/ChatGPT**
+  (no key) — then adds it to your library. Any photo you add (often the ID photo)
+  becomes the plant's **starting photo** in the progression automatically.
 - **Care guide** — light, water, humidity, temperature, soil, toxicity and tips
   for each species.
 - **Troubleshoot** — pick a symptom (yellow leaves, brown tips, drooping, pests…)

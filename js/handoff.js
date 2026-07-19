@@ -156,9 +156,9 @@ function normalize(o) {
   };
 }
 
-// Extract structured findings from a pasted AI reply. Prefers a fenced code
-// block; falls back to any JSON object in the text.
-export function parseHandoffImport(text) {
+// Shared: find the first JSON object (in a fenced block, else the whole text)
+// that satisfies `predicate`.
+function firstJson(text, predicate) {
   if (!text || typeof text !== 'string') return null;
   const candidates = [];
   const fenceRe = /```[a-zA-Z-]*\s*\n?([\s\S]*?)```/g;
@@ -167,7 +167,77 @@ export function parseHandoffImport(text) {
   candidates.push(text); // whole-text fallback
   for (const c of candidates) {
     const obj = tryParse(c);
-    if (looksLikeFindings(obj)) return normalize(obj);
+    if (obj && predicate(obj)) return obj;
   }
   return null;
 }
+
+// Extract structured findings from a pasted AI reply.
+export function parseHandoffImport(text) {
+  const obj = firstJson(text, looksLikeFindings);
+  return obj ? normalize(obj) : null;
+}
+
+// ---- Species care lookup by paste ---------------------------------------
+
+const SPECIES_TEMPLATE = [
+  '```plant-species',
+  '{',
+  '  "common_name": "",',
+  '  "latin_name": "",',
+  '  "category": "tropical-foliage | succulent | fern | orchid | flowering | herb | other",',
+  '  "water_interval_days": 7,',
+  '  "winter_factor": 1.6,',
+  '  "fertilize_interval_days": 30,',
+  '  "feed_winter": false,',
+  '  "light": "low | medium | bright | full",',
+  '  "humidity": "e.g. Average",',
+  '  "temp_min_c": 13,',
+  '  "toxicity": "e.g. Toxic to pets",',
+  '  "difficulty": "easy | moderate | hard",',
+  '  "soil": "short soil recommendation",',
+  '  "tips": "1-2 sentences: the key care tip and the most common mistake"',
+  '}',
+  '```',
+].join('\n');
+
+// A prompt the user pastes into their own AI to get importable care data.
+export function speciesPrompt(name) {
+  return [
+    `I'm adding a houseplant${name ? ` — "${name}"` : ''} to my plant-care app, but the app has no care data for it. Give me accurate baseline INDOOR care data for this species.`,
+    'Output ONLY the fenced code block below — valid JSON, straight quotes, no trailing commas, no comments. Field notes: water_interval_days = typical days between waterings in the growing season for an average indoor pot; winter_factor = multiply that by this in winter dormancy (~1.2 for tropicals in a warm home, up to 3.0 for cacti); light is one of low/medium/bright/full; temp_min_c = minimum safe temperature in Celsius.',
+    '',
+    SPECIES_TEMPLATE,
+  ].join('\n');
+}
+
+const CATEGORY_ENUM = ['succulent', 'tropical-foliage', 'fern', 'orchid', 'flowering', 'herb', 'other'];
+
+// Parse pasted species care data into the shape saveLookedUpSpecies expects.
+export function parseSpeciesImport(text) {
+  const o = firstJson(text, (x) => x && typeof x === 'object' &&
+    ('water_interval_days' in x || 'latin_name' in x || 'common_name' in x));
+  if (!o) return null;
+  const str = (v) => (typeof v === 'string' ? v.trim() : '');
+  const int = (v, d) => (Number.isFinite(v) ? Math.round(v) : d);
+  const num = (v, d) => (Number.isFinite(v) ? v : d);
+  return {
+    matched: true,
+    common_name: str(o.common_name),
+    latin_name: str(o.latin_name),
+    category: CATEGORY_ENUM.includes(o.category) ? o.category : 'other',
+    water_interval_days: int(o.water_interval_days, 7),
+    winter_factor: num(o.winter_factor, 1.5),
+    fertilize_interval_days: int(o.fertilize_interval_days, 30),
+    feed_winter: !!o.feed_winter,
+    light: LIGHT_ENUM_SPOT.includes(o.light) ? o.light : 'medium',
+    humidity: str(o.humidity) || 'Average',
+    temp_min_c: int(o.temp_min_c, 13),
+    toxicity: str(o.toxicity) || 'Unknown',
+    difficulty: ['easy', 'moderate', 'hard'].includes(o.difficulty) ? o.difficulty : 'moderate',
+    soil: str(o.soil) || 'Well-draining potting mix',
+    tips: str(o.tips),
+  };
+}
+
+const LIGHT_ENUM_SPOT = ['low', 'medium', 'bright', 'full'];

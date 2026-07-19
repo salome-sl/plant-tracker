@@ -8,14 +8,14 @@ import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings } from './coach.js';
-import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT } from './handoff.js';
+import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
 const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.9';
+const APP_VERSION = '1.3.10';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -413,6 +413,56 @@ function buildSpeciesOptions(sel, selectedId) {
   }
   sel.append(el('option', { value: '__custom' }, 'Custom / not listed'));
   if (selectedId != null) sel.value = selectedId;
+}
+
+// Find a library species (built-in or saved) matching a name/latin guess.
+function findSpeciesByName(name) {
+  if (!name) return null;
+  const q = name.trim().toLowerCase();
+  if (!q) return null;
+  const all = allSpecies();
+  const exact = all.find((s) =>
+    s.name.toLowerCase() === q ||
+    (s.latin || '').toLowerCase() === q ||
+    (s.aka || []).some((a) => a.toLowerCase() === q));
+  if (exact) return exact;
+  if (q.length < 4) return null;
+  return all.find((s) =>
+    s.name.toLowerCase().includes(q) || q.includes(s.name.toLowerCase()) ||
+    (s.latin && (s.latin.toLowerCase().includes(q) || q.includes(s.latin.toLowerCase())))) || null;
+}
+
+// Get species care by pasting a prompt into your own Claude/ChatGPT (no key).
+// onCare(careObj) applies + saves it.
+function openSpeciesPasteDialog(name, onCare) {
+  const prompt = speciesPrompt(name);
+  const promptArea = el('textarea', { class: 'field handoff-text', rows: 6, readonly: 'readonly', spellcheck: 'false' });
+  promptArea.value = prompt;
+  const copyBtn = el('button', { class: 'btn btn-primary full', onClick: async () => {
+    try { await navigator.clipboard.writeText(prompt); toast('Copied — paste into Claude or ChatGPT'); }
+    catch { promptArea.focus(); promptArea.select(); toast('Select all, then copy (Ctrl/Cmd+C)'); }
+  } }, '📋 Copy species prompt');
+  const pasteArea = el('textarea', { class: 'field', rows: 5, placeholder: 'Paste your AI’s reply here — the ```plant-species block…' });
+  const result = el('div', { class: 'id-note' });
+  const importBtn = el('button', { class: 'btn btn-secondary full', onClick: async () => {
+    clear(result);
+    const c = parseSpeciesImport(pasteArea.value);
+    if (!c) { result.append('⚠️ Couldn’t read a plant-species block. Copy your AI’s whole reply, including the code block.'); return; }
+    m.close();
+    await onCare(c);
+  } }, 'Add to my library');
+  const m = modal([
+    el('h3', { class: 'modal-title' }, '📋 Get care info from your own AI'),
+    el('div', { class: 'hint' }, 'No API key needed — copy this prompt into Claude or ChatGPT, then paste its reply back to add this plant to your library.'),
+    el('div', { class: 'handoff-step' }, '1 · Copy & paste into your AI'),
+    promptArea,
+    copyBtn,
+    el('div', { class: 'handoff-step' }, '2 · Paste the reply'),
+    pasteArea,
+    importBtn,
+    result,
+    el('button', { class: 'btn btn-ghost full', onClick: () => m.close() }, 'Close'),
+  ]);
 }
 
 // Persist an AI-looked-up species to the reusable library (dedupe by name/latin).
@@ -1360,9 +1410,29 @@ function plantForm(existing) {
       if (a.is_plant === false) {
         idNote.append("That doesn't look like a plant — try another photo.");
       } else {
-        if (a.species_guess && !latinInput.value) latinInput.value = a.species_guess;
-        if (a.species_guess && !nameInput.value) nameInput.value = a.species_guess;
-        idNote.append(el('div', {}, `${a.headline || ''} ${a.assessment || ''}`.trim()));
+        const guess = a.species_guess;
+        const match = guess ? findSpeciesByName(guess) : null;
+        if (match) {
+          // In the library → select it so its full care profile loads.
+          speciesSel.value = match.id;
+          buildSpeciesOptions(speciesSel, match.id);
+          refreshFromSpecies(true);
+          idNote.append(el('div', {}, `✅ Identified as ${match.name} — care details loaded. ${a.assessment || ''}`.trim()));
+        } else if (guess) {
+          // Not in the library → route to the lookup with the name filled in.
+          speciesSel.value = '__custom';
+          refreshFromSpecies(false); // reveals the custom lookup box
+          lookupNameInput.value = guess;
+          if (!nameInput.value) nameInput.value = guess;
+          idNote.append(el('div', { class: 'id-missing' }, [
+            `Looks like ${guess} — but the app has no care info for it yet. `,
+            el('b', {}, 'Add it below'),
+            ' via the API, or by pasting from your own Claude/ChatGPT.',
+          ]));
+          customBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          idNote.append(el('div', {}, `${a.headline || ''} ${a.assessment || ''}`.trim()));
+        }
       }
     } catch (e) {
       clear(idNote);
@@ -1409,11 +1479,13 @@ function plantForm(existing) {
   // Not in our library? Look up care details with AI.
   const lookupNameInput = el('input', { class: 'field', placeholder: 'e.g. Bird of Paradise, Strelitzia' });
   const lookupBtn = el('button', { class: 'btn btn-secondary full', type: 'button' }, '✨ Look up care info');
+  const pasteSpeciesBtn = el('button', { class: 'btn btn-ghost full', type: 'button' }, '📋 Or paste from your own AI (no key)');
   const lookupNote = el('div', { class: 'id-note' });
   const customBox = el('div', { class: 'custom-box', style: 'display:none' }, [
-    el('div', { class: 'hint' }, 'Not in the list? Type the species name and I’ll fetch its care details and fill the schedule for you.'),
+    el('div', { class: 'hint' }, 'Not in our library? Type the species and get its care details — either via the API, or by pasting from your own Claude/ChatGPT. It’s saved for reuse.'),
     labeled('Species name', lookupNameInput),
     lookupBtn,
+    pasteSpeciesBtn,
     lookupNote,
   ]);
   form.append(customBox);
@@ -1536,49 +1608,56 @@ function plantForm(existing) {
   form.append(warnBox);
   refreshWarnings();
 
-  // AI species care lookup for custom plants.
+  // Apply looked-up (API or pasted) care data: fill the form, save to the
+  // reusable library, and select the new species. Shared by both lookup paths.
+  async function applyLookedUpCare(c) {
+    Object.assign(model.profile, {
+      water: Math.max(1, c.water_interval_days || model.profile.water),
+      winterFactor: c.winter_factor || model.profile.winterFactor,
+      fertilize: Math.max(0, Number.isInteger(c.fertilize_interval_days) ? c.fertilize_interval_days : model.profile.fertilize),
+      feedWinter: !!c.feed_winter,
+      light: c.light || model.profile.light,
+      humidity: c.humidity || model.profile.humidity,
+      tempMin: Number.isFinite(c.temp_min_c) ? c.temp_min_c : model.profile.tempMin,
+      toxic: c.toxicity || model.profile.toxic,
+      difficulty: c.difficulty || model.profile.difficulty,
+      soil: c.soil || model.profile.soil,
+      tips: c.tips || model.profile.tips,
+    });
+    if (c.latin_name && !latinInput.value) latinInput.value = c.latin_name;
+    if (c.common_name && !nameInput.value) nameInput.value = c.common_name;
+    syncAdvancedInputs(); refreshPreview(); refreshWarnings();
+    adv.classList.add('open');
+    const savedId = await saveLookedUpSpecies(c);
+    model.speciesId = savedId;
+    buildSpeciesOptions(speciesSel, savedId);
+    refreshFromSpecies(false); // show the species tip + hide the custom box
+    toast(`Saved ${c.common_name || latinInput.value || 'this species'} to your library`);
+  }
+
+  // Option A — look up care via the API.
   lookupBtn.addEventListener('click', async () => {
     const q = lookupNameInput.value.trim() || nameInput.value.trim();
     clear(lookupNote);
     if (!q) { lookupNote.append('Type a species name first.'); return; }
-    if (!hasApiKey()) { lookupNote.append('Add your Anthropic API key in Settings to look up species.'); return; }
+    if (!hasApiKey()) { lookupNote.append('Add your Anthropic API key in Settings, or use “paste from your own AI” below.'); return; }
     lookupBtn.disabled = true; lookupBtn.textContent = 'Looking up…';
     try {
       const c = await lookupSpeciesCare(q, photoState.dataUrl || null);
       clear(lookupNote);
-      if (!c.matched) {
-        lookupNote.append('⚠️ ' + (c.note || 'Couldn’t identify that species — try a more specific name.'));
-      } else {
-        Object.assign(model.profile, {
-          water: Math.max(1, c.water_interval_days || model.profile.water),
-          winterFactor: c.winter_factor || model.profile.winterFactor,
-          fertilize: Math.max(0, Number.isInteger(c.fertilize_interval_days) ? c.fertilize_interval_days : model.profile.fertilize),
-          feedWinter: !!c.feed_winter,
-          light: c.light || model.profile.light,
-          humidity: c.humidity || model.profile.humidity,
-          tempMin: Number.isFinite(c.temp_min_c) ? c.temp_min_c : model.profile.tempMin,
-          toxic: c.toxicity || model.profile.toxic,
-          difficulty: c.difficulty || model.profile.difficulty,
-          soil: c.soil || model.profile.soil,
-          tips: c.tips || model.profile.tips,
-        });
-        if (c.latin_name && !latinInput.value) latinInput.value = c.latin_name;
-        if (c.common_name && !nameInput.value) nameInput.value = c.common_name;
-        syncAdvancedInputs(); refreshPreview(); refreshWarnings();
-        adv.classList.add('open');
-        // Save to the reusable library and select it in the picker.
-        const savedId = await saveLookedUpSpecies(c);
-        model.speciesId = savedId;
-        buildSpeciesOptions(speciesSel, savedId);
-        refreshFromSpecies(false); // show the species tip + hide the custom box
-        toast(`Saved ${c.common_name || q} to your library`);
-      }
+      if (!c.matched) lookupNote.append('⚠️ ' + (c.note || 'Couldn’t identify that species — try a more specific name.'));
+      else await applyLookedUpCare(c);
     } catch (e) {
       clear(lookupNote);
       lookupNote.append('⚠️ ' + (e instanceof AIError ? e.message : 'Lookup failed. Please try again.'));
     } finally {
       lookupBtn.disabled = false; lookupBtn.textContent = '✨ Look up care info';
     }
+  });
+
+  // Option B — paste care from your own Claude/ChatGPT (no API key).
+  pasteSpeciesBtn.addEventListener('click', () => {
+    openSpeciesPasteDialog(lookupNameInput.value.trim() || nameInput.value.trim(), applyLookedUpCare);
   });
 
   // Save
@@ -1598,6 +1677,11 @@ function plantForm(existing) {
       model.profile.light = lightSel.value;
       model.conditions = currentConditions();
       await db.putPlant(model);
+      // Log the photo you added (often the identification photo) as the starting
+      // photo, so it appears in the progression and doesn't nag for one.
+      if (!isEdit && model.photo) {
+        await logCare(model.id, 'photo', acquiredInput.value || todayISO(), { photo: model.photo, notes: 'Starting photo' });
+      }
       if (!isEdit && lastWateredInput.value) {
         await logCare(model.id, 'water', lastWateredInput.value);
       }
