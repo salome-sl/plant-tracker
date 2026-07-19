@@ -12,13 +12,19 @@ export function feedCategoryFactor(category) {
   return { flowering: 0.6, herb: 0.55, succulent: 1.35 }[category] ?? 1.0;
 }
 
+// The plant's category — from its library species if it has one, otherwise from
+// the category stored on its own profile (set via the form's "Plant type" picker
+// or an AI/paste lookup), falling back to 'other'.
+export function plantCategory(plant) {
+  const s = plant.speciesId ? getSpecies(plant.speciesId) : null;
+  return (s && s.category) || (plant.profile && plant.profile.category) || 'other';
+}
+
 // The feeding interval adjusted for the plant type (days).
 export function effectiveFeedInterval(plant) {
   const base = plant.profile.fertilize;
   if (!base) return base; // 0 = rarely fed
-  const s = plant.speciesId ? getSpecies(plant.speciesId) : null;
-  const category = s ? s.category : 'other';
-  return Math.max(1, Math.round(base * feedCategoryFactor(category)));
+  return Math.max(1, Math.round(base * feedCategoryFactor(plantCategory(plant))));
 }
 
 export function startOfDay(d = new Date()) {

@@ -82,6 +82,12 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
 - **Progress-photo reminders** — after ~30 days without a photo, the plant (and
   the Today dashboard) prompt you for a fresh health photo, with a **one-tap
   camera button** that opens straight to the camera and saves it to the log.
+- **Plant type (category)** — every plant carries a type (succulent, tropical
+  foliage, fern, flowering, herb, orchid). Library and looked-up plants get it
+  automatically; for a plant you add by hand there's a **"Plant type" picker** in
+  the watering & feeding section. It needs no internet and it's what powers
+  feed‑by‑type spacing and the tailored troubleshooter — so *any* plant, however
+  it's added, gets the full treatment.
 - **Add any plant** — not just the built-in species. Pick "Custom / not listed",
   type the species, and **✨ Look up care info** fetches its full care profile
   (watering, feeding, light, humidity, soil, toxicity, tips) via AI and fills the

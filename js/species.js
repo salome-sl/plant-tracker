@@ -346,6 +346,7 @@ export const DEFAULT_PROFILE = {
   light: 'medium', humidity: 'Average', tempMin: 13,
   toxic: 'Unknown', difficulty: 'moderate',
   soil: 'Well-draining potting mix',
+  category: 'other',
   tips: 'No species preset — using a general routine. Adjust the watering interval to match how fast this plant dries out.',
 };
 
@@ -389,6 +390,7 @@ export function profileFromSpecies(id) {
     toxic: base.toxic,
     difficulty: base.difficulty,
     soil: base.soil,
+    category: base.category || 'other',
     tips: base.tips,
   };
 }
