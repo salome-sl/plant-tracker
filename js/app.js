@@ -16,7 +16,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.21';
+const APP_VERSION = '1.3.22';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -73,6 +73,7 @@ function toast(msg, actionLabel, action) {
   if (actionLabel && action) {
     t.append(el('button', { class: 'toast-action', onClick: () => { action(); hideToast(); } }, actionLabel));
   }
+  localizeDOM(t); // toasts are created outside the render pass — translate them here
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(hideToast, actionLabel ? 6000 : 3000);
@@ -2175,8 +2176,10 @@ route(/^\/settings$/, async () => {
     if (perm === 'granted') { saveSettings({ notifications: true }); toast('Reminders on'); render(); }
     else toast('Permission denied');
   } }, settings.notifications && Notification.permission === 'granted' ? '✅ Reminders enabled' : 'Enable reminders');
+  const testNotifBtn = el('button', { class: 'btn btn-ghost', onClick: sendTestNotification }, 'Send a test notification');
   view.append(settingsGroup('Reminders', [
     notifBtn,
+    testNotifBtn,
     el('div', { class: 'hint' }, 'You’ll always get a “what needs care today” summary when you open or return to the app. On an installed Android app, it can also remind you about once a day in the background (Chrome decides the exact timing). iPhone doesn’t allow background reminders without a server, so there it’s open/reopen only.'),
   ]));
 
@@ -2376,6 +2379,42 @@ function formatReminder(tasks, now, lang = getLang()) {
   const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
   if (worst) body += nl ? ` ${worst.name} is ${days(worst.over)} te laat.` : ` ${worst.name} is ${days(worst.over)} overdue.`;
   return { title, body };
+}
+
+// Fire a real notification right now, in the current language, so the user can
+// confirm reminders work (and see the Dutch text) without waiting for Chrome's
+// background schedule. Uses the service-worker path when available — the same
+// one the background reminders use — so it's a faithful preview.
+async function sendTestNotification() {
+  const nl = getLang() === 'nl';
+  if (!('Notification' in window)) { toast('Notifications not supported here'); return; }
+  let perm = Notification.permission;
+  if (perm !== 'granted') perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast('Permission denied'); return; }
+
+  const now = new Date();
+  const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
+  const due = dueTasks(plants, events, now, getSettings().hemisphere, 0)
+    .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
+  // Preview real due tasks if there are any; otherwise a friendly sample.
+  const sample = due.length
+    ? due
+    : [{ plantId: 'sample', name: nl ? 'Voorbeeldplant' : 'Sample plant', type: 'water', due: new Date(now.getTime() - 2 * 86400000).toISOString() }];
+  const msg = formatReminder(sample, now) || { title: nl ? '🌿 Plantenzorg' : '🌿 Plant care', body: '' };
+
+  try {
+    const reg = navigator.serviceWorker && navigator.serviceWorker.controller
+      ? await navigator.serviceWorker.ready : null;
+    if (reg && reg.showNotification) {
+      await reg.showNotification(msg.title, { body: msg.body, tag: 'plant-care-test', icon: './icons/icon-192.png', badge: './icons/icon-192.png' });
+    } else {
+      new Notification(msg.title, { body: msg.body });
+    }
+    toast(nl ? 'Testmelding verstuurd' : 'Test notification sent');
+  } catch {
+    try { new Notification(msg.title, { body: msg.body }); toast(nl ? 'Testmelding verstuurd' : 'Test notification sent'); }
+    catch { toast(nl ? 'Kon de melding niet tonen' : 'Could not show notification'); }
+  }
 }
 
 async function checkReminders() {
