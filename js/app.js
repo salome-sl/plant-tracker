@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.10';
+const APP_VERSION = '1.3.12';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -432,16 +432,46 @@ function findSpeciesByName(name) {
     (s.latin && (s.latin.toLowerCase().includes(q) || q.includes(s.latin.toLowerCase())))) || null;
 }
 
-// Get species care by pasting a prompt into your own Claude/ChatGPT (no key).
-// onCare(careObj) applies + saves it.
-function openSpeciesPasteDialog(name, onCare) {
-  const prompt = speciesPrompt(name);
+// Put a photo on the clipboard (PNG); falls back to the share sheet.
+async function copyPhotoToClipboard(dataUrl) {
+  const blob = await dataUrlToPngBlob(dataUrl);
+  if (window.ClipboardItem && navigator.clipboard && navigator.clipboard.write) {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    return;
+  }
+  if (navigator.canShare) {
+    const file = new File([blob], 'plant.png', { type: 'image/png' });
+    if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
+  }
+  throw new Error('unsupported');
+}
+
+// Get species care (or identify from a photo) by pasting a prompt into your own
+// Claude/ChatGPT — no API key. onCare(careObj) applies + saves it.
+function openSpeciesPasteDialog(name, onCare, photoDataUrl = null) {
+  const identifying = !!photoDataUrl && !name;
+  const prompt = speciesPrompt(name, { fromPhoto: !!photoDataUrl });
   const promptArea = el('textarea', { class: 'field handoff-text', rows: 6, readonly: 'readonly', spellcheck: 'false' });
   promptArea.value = prompt;
   const copyBtn = el('button', { class: 'btn btn-primary full', onClick: async () => {
     try { await navigator.clipboard.writeText(prompt); toast('Copied — paste into Claude or ChatGPT'); }
     catch { promptArea.focus(); promptArea.select(); toast('Select all, then copy (Ctrl/Cmd+C)'); }
-  } }, '📋 Copy species prompt');
+  } }, '📋 Copy prompt');
+
+  let photoRow = null;
+  if (photoDataUrl) {
+    photoRow = el('div', { class: 'handoff-photo' }, [
+      el('img', { src: photoDataUrl, alt: 'plant photo' }),
+      el('div', { class: 'handoff-photo-side' }, [
+        el('button', { class: 'btn btn-secondary full', onClick: async () => {
+          try { await copyPhotoToClipboard(photoDataUrl); toast('Photo copied — paste it into your AI'); }
+          catch { toast('Press and hold the photo to copy it'); }
+        } }, '📷 Copy photo'),
+        el('div', { class: 'hint' }, 'Paste the prompt into your AI, then paste the photo so it can identify the plant.'),
+      ]),
+    ]);
+  }
+
   const pasteArea = el('textarea', { class: 'field', rows: 5, placeholder: 'Paste your AI’s reply here — the ```plant-species block…' });
   const result = el('div', { class: 'id-note' });
   const importBtn = el('button', { class: 'btn btn-secondary full', onClick: async () => {
@@ -450,19 +480,24 @@ function openSpeciesPasteDialog(name, onCare) {
     if (!c) { result.append('⚠️ Couldn’t read a plant-species block. Copy your AI’s whole reply, including the code block.'); return; }
     m.close();
     await onCare(c);
-  } }, 'Add to my library');
-  const m = modal([
-    el('h3', { class: 'modal-title' }, '📋 Get care info from your own AI'),
-    el('div', { class: 'hint' }, 'No API key needed — copy this prompt into Claude or ChatGPT, then paste its reply back to add this plant to your library.'),
-    el('div', { class: 'handoff-step' }, '1 · Copy & paste into your AI'),
+  } }, identifying ? 'Identify & add' : 'Add to my library');
+
+  const children = [
+    el('h3', { class: 'modal-title' }, identifying ? '📸 Identify with your own AI' : '📋 Get care info from your own AI'),
+    el('div', { class: 'hint' }, identifying
+      ? 'No API key needed — copy this prompt and the photo into Claude or ChatGPT, then paste its reply back to identify and add this plant.'
+      : 'No API key needed — copy this prompt into Claude or ChatGPT, then paste its reply back to add this plant to your library.'),
+    el('div', { class: 'handoff-step' }, '1 · Copy the prompt (and photo) into your AI'),
     promptArea,
     copyBtn,
+    photoRow,
     el('div', { class: 'handoff-step' }, '2 · Paste the reply'),
     pasteArea,
     importBtn,
     result,
     el('button', { class: 'btn btn-ghost full', onClick: () => m.close() }, 'Close'),
-  ]);
+  ].filter(Boolean);
+  const m = modal(children);
 }
 
 // Persist an AI-looked-up species to the reusable library (dedupe by name/latin).
@@ -1389,10 +1424,11 @@ function plantForm(existing) {
   const photoState = { dataUrl: model.photo };
   const idNote = el('div', { class: 'id-note' });
   const idBtn = el('button', { class: 'btn btn-secondary full', type: 'button', style: 'display:none' }, '✨ Identify & assess from photo');
+  const idPasteBtn = el('button', { class: 'btn btn-ghost full', type: 'button', style: 'display:none' }, '📋 Identify with your own AI (no key)');
   const photoFieldEl = photoField({
     initial: model.photo,
     big: true,
-    onPicked: (d) => { photoState.dataUrl = d; idBtn.style.display = ''; clear(idNote); },
+    onPicked: (d) => { photoState.dataUrl = d; idBtn.style.display = ''; idPasteBtn.style.display = ''; clear(idNote); },
   });
   form.append(photoFieldEl.node);
 
@@ -1441,8 +1477,13 @@ function plantForm(existing) {
       idBtn.disabled = false; idBtn.textContent = '✨ Identify & assess from photo';
     }
   });
-  if (isEdit && model.photo) idBtn.style.display = '';
-  form.append(idBtn, idNote);
+  // Paste-based identification (no API key) — opens the paste dialog with the photo.
+  idPasteBtn.addEventListener('click', () => {
+    if (!photoState.dataUrl) return;
+    openSpeciesPasteDialog('', applyIdentifiedCare, photoState.dataUrl);
+  });
+  if (isEdit && model.photo) { idBtn.style.display = ''; idPasteBtn.style.display = ''; }
+  form.append(idBtn, idPasteBtn, idNote);
 
   // Name
   const nameInput = el('input', { class: 'field', placeholder: 'e.g. Monstera by the window', value: model.name });
@@ -1500,9 +1541,11 @@ function plantForm(existing) {
 
   // Last watered — so a plant you've had a while starts with an accurate schedule.
   const lastWateredInput = el('input', { type: 'date', class: 'field', max: todayISO() });
+  const lastFedInput = el('input', { type: 'date', class: 'field', max: todayISO() });
   if (!isEdit) {
     form.append(labeled('Last watered (optional)', lastWateredInput));
-    form.append(el('div', { class: 'hint bg-hint' }, 'Had it a while? Set when you last watered it and the schedule will count from there. Leave blank if it’s brand new.'));
+    form.append(labeled('Last fed (optional)', lastFedInput));
+    form.append(el('div', { class: 'hint bg-hint' }, 'Had it a while? Set when you last watered and fed it so both schedules start accurate. Leave blank if it’s brand new.'));
   }
 
   // Advanced schedule (prefilled from species, editable)
@@ -1635,6 +1678,21 @@ function plantForm(existing) {
     toast(`Saved ${c.common_name || latinInput.value || 'this species'} to your library`);
   }
 
+  // From a pasted identification: prefer a built-in library match (curated care),
+  // otherwise save the pasted data as a custom species.
+  async function applyIdentifiedCare(c) {
+    const match = findSpeciesByName(c.common_name || c.latin_name);
+    if (match && !isCustomSpecies(match.id)) {
+      speciesSel.value = match.id;
+      buildSpeciesOptions(speciesSel, match.id);
+      refreshFromSpecies(true);
+      if (c.latin_name && !latinInput.value) latinInput.value = c.latin_name;
+      toast(`Identified as ${match.name} — care details loaded`);
+    } else {
+      await applyLookedUpCare(c);
+    }
+  }
+
   // Option A — look up care via the API.
   lookupBtn.addEventListener('click', async () => {
     const q = lookupNameInput.value.trim() || nameInput.value.trim();
@@ -1678,12 +1736,16 @@ function plantForm(existing) {
       model.conditions = currentConditions();
       await db.putPlant(model);
       // Log the photo you added (often the identification photo) as the starting
-      // photo, so it appears in the progression and doesn't nag for one.
+      // photo, so it appears in the progression and doesn't nag for one. Dated
+      // TODAY — it's a snapshot of the plant now, not when you acquired it.
       if (!isEdit && model.photo) {
-        await logCare(model.id, 'photo', acquiredInput.value || todayISO(), { photo: model.photo, notes: 'Starting photo' });
+        await logCare(model.id, 'photo', todayISO(), { photo: model.photo, notes: 'Starting photo' });
       }
       if (!isEdit && lastWateredInput.value) {
         await logCare(model.id, 'water', lastWateredInput.value);
+      }
+      if (!isEdit && lastFedInput.value) {
+        await logCare(model.id, 'fertilize', lastFedInput.value);
       }
       toast(isEdit ? 'Plant updated' : 'Plant added');
       navigate(`/plant/${model.id}`);

@@ -90,8 +90,11 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   included in your backups. Remove one from its Care Guide page. If the app
   identifies a plant it doesn't have, it says so and offers to fetch the care
   info **either via the API or by pasting a prompt into your own Claude/ChatGPT**
-  (no key) — then adds it to your library. Any photo you add (often the ID photo)
-  becomes the plant's **starting photo** in the progression automatically.
+  (no key) — then adds it to your library. **Identifying** a plant from a photo
+  also offers both paths: the API, or **📋 Identify with your own AI** — copy the
+  prompt + photo into Claude/ChatGPT and paste its answer back. Any photo you add
+  (often the ID photo) becomes the plant's **starting photo** (dated today) in the
+  progression automatically.
 - **Care guide** — light, water, humidity, temperature, soil, toxicity and tips
   for each species.
 - **Troubleshoot** — pick a symptom (yellow leaves, brown tips, drooping, pests…)

@@ -202,9 +202,14 @@ const SPECIES_TEMPLATE = [
 ].join('\n');
 
 // A prompt the user pastes into their own AI to get importable care data.
-export function speciesPrompt(name) {
+// With { fromPhoto: true } and no name, it asks the AI to identify the plant
+// in an attached photo first, then fill in its care data.
+export function speciesPrompt(name, opts = {}) {
+  const intro = (opts.fromPhoto && !name)
+    ? "I'm adding a houseplant to my care app. Please identify the plant in the photo I'm attaching in this chat, then give accurate baseline INDOOR care data for it. Put the plant you identify in common_name and latin_name."
+    : `I'm adding a houseplant${name ? ` — "${name}"` : ''} to my plant-care app, but the app has no care data for it. Give me accurate baseline INDOOR care data for this species.`;
   return [
-    `I'm adding a houseplant${name ? ` — "${name}"` : ''} to my plant-care app, but the app has no care data for it. Give me accurate baseline INDOOR care data for this species.`,
+    intro,
     'Output ONLY the fenced code block below — valid JSON, straight quotes, no trailing commas, no comments. Field notes: water_interval_days = typical days between waterings in the growing season for an average indoor pot; winter_factor = multiply that by this in winter dormancy (~1.2 for tropicals in a warm home, up to 3.0 for cacti); light is one of low/medium/bright/full; temp_min_c = minimum safe temperature in Celsius.',
     '',
     SPECIES_TEMPLATE,
