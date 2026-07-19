@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.15';
+const APP_VERSION = '1.3.16';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -155,9 +155,9 @@ async function refreshReminderState() {
     const now = new Date();
     const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
     const tasks = dueTasks(plants, events, now, settings.hemisphere, 0)
-      .map((t) => ({ name: t.plant.name, type: t.type, due: t.due.toISOString() }));
+      .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
     const photoDue = plants.filter((p) => photoStatus(p, events, now).due)
-      .map((p) => ({ name: p.name, type: 'photo', due: now.toISOString() }));
+      .map((p) => ({ plantId: p.id, name: p.name, type: 'photo', due: now.toISOString() }));
     await db.putMeta('reminderDigest', { tasks: tasks.concat(photoDue), generatedAt: now.toISOString() });
   } catch { /* ignore */ }
 }
@@ -2155,25 +2155,74 @@ async function registerPeriodicSync(reg) {
   } catch { /* not supported here */ }
 }
 
+// A stable local-date key (YYYY-M-D) used to send each plant/task at most one
+// reminder per calendar day — the anti-spam guard shared by the foreground and
+// background notifiers. Mirrored in sw.js; keep the two in sync.
+function reminderDayKey(d) {
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+// How many whole days past due a task is (0 = due today, 1 = a day overdue…).
+function reminderOverdueDays(dueISO, now) {
+  const s = (x) => { const y = new Date(x); y.setHours(0, 0, 0, 0); return y.getTime(); };
+  return Math.round((s(now) - s(dueISO)) / (24 * 60 * 60 * 1000));
+}
+
+// Turn a set of due/overdue tasks into an escalating, plant-specific message.
+// Names the at-risk plant when it's just one or two, summarizes when it's many,
+// and always surfaces the most-overdue plant so it doesn't get lost. Mirrored in
+// sw.js. Returns { title, body } or null.
+function formatReminder(tasks, now) {
+  if (!tasks.length) return null;
+  const verb = { water: 'watering', fertilize: 'feeding', photo: 'a progress photo' };
+  const ann = tasks.map((t) => ({ ...t, over: reminderOverdueDays(t.due, now) }));
+
+  if (ann.length === 1) {
+    const t = ann[0];
+    if (t.over >= 1) {
+      return { title: `🚨 ${t.name} is overdue`, body: `${t.over} day${t.over > 1 ? 's' : ''} overdue for ${verb[t.type]} — it's at risk.` };
+    }
+    return { title: '🌿 Plant care', body: `${t.name} needs ${verb[t.type]} today.` };
+  }
+
+  const n = (type) => ann.filter((t) => t.type === type).length;
+  const parts = [];
+  if (n('water')) parts.push(`${n('water')} to water`);
+  if (n('fertilize')) parts.push(`${n('fertilize')} to feed`);
+  if (n('photo')) parts.push(`${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
+  let body = `${parts.join(', ')}.`;
+  const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
+  if (worst) body += ` ${worst.name} is ${worst.over} day${worst.over > 1 ? 's' : ''} overdue.`;
+  return { title: '🌿 Plant care', body };
+}
+
 async function checkReminders() {
   const settings = getSettings();
   if (!settings.notifications || !('Notification' in window) || Notification.permission !== 'granted') return;
   const now = new Date();
   const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
-  const due = dueTasks(plants, events, now, settings.hemisphere, 0);
-  const waterCount = due.filter((t) => t.type === 'water').length;
-  const feedCount = due.filter((t) => t.type === 'fertilize').length;
-  const photoCount = plants.filter((p) => photoStatus(p, events, now).due).length;
-  const parts = [];
-  if (waterCount) parts.push(`${waterCount} to water`);
-  if (feedCount) parts.push(`${feedCount} to feed`);
-  if (photoCount) parts.push(`${photoCount} due a progress photo`);
-  if (!parts.length) return;
+  const due = dueTasks(plants, events, now, settings.hemisphere, 0)
+    .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
+  const photoDue = plants.filter((p) => photoStatus(p, events, now).due)
+    .map((p) => ({ plantId: p.id, name: p.name, type: 'photo', due: now.toISOString() }));
+  const all = due.concat(photoDue);
+  if (!all.length) { await db.putMeta('notifyLog', {}); return; }
+
+  // Once-per-day de-dup: only notify about tasks we haven't already flagged today.
+  const today = reminderDayKey(now);
+  const log = (await db.getMeta('notifyLog')) || {};
+  const fresh = all.filter((t) => log[`${t.plantId}|${t.type}`] !== today);
+  // Stamp every currently-due task as handled today (this also drops keys for
+  // tasks that were watered/fed since — so tomorrow the still-due ones repeat).
+  const newLog = {};
+  for (const t of all) newLog[`${t.plantId}|${t.type}`] = today;
+  await db.putMeta('notifyLog', newLog);
+  if (!fresh.length) return; // already reminded about all of these today — no spam
+
+  const msg = formatReminder(fresh, now);
+  if (!msg) return;
   try {
-    new Notification('🌿 Plant care', {
-      body: `${parts.join(', ')} today.`,
-      tag: 'plant-care-daily',
-    });
+    new Notification(msg.title, { body: msg.body, tag: 'plant-care-daily' });
   } catch { /* ignore */ }
 }
 

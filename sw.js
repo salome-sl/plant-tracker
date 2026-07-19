@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v25';
+const CACHE = 'plant-tracker-v26';
 
 const ASSETS = [
   './',
@@ -88,20 +88,77 @@ function idbGetMeta(key) {
   });
 }
 
-async function runDailyReminderCheck() {
-  const digest = await idbGetMeta('reminderDigest');
-  if (!digest || !Array.isArray(digest.tasks)) return;
-  const now = Date.now();
-  const due = digest.tasks.filter((t) => new Date(t.due).getTime() <= now);
-  if (!due.length) return;
-  const n = (type) => due.filter((t) => t.type === type).length;
+function idbPutMeta(key, value) {
+  return new Promise((resolve) => {
+    const req = indexedDB.open('plant-tracker');
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains('meta')) { resolve(false); return; }
+      const tx = db.transaction('meta', 'readwrite');
+      tx.objectStore('meta').put({ key, value });
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    };
+    req.onerror = () => resolve(false);
+  });
+}
+
+// ---- Shared reminder formatting (mirror of js/app.js; keep in sync) ------
+function reminderDayKey(d) {
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+function reminderOverdueDays(dueISO, now) {
+  const s = (x) => { const y = new Date(x); y.setHours(0, 0, 0, 0); return y.getTime(); };
+  return Math.round((s(now) - s(dueISO)) / (24 * 60 * 60 * 1000));
+}
+function formatReminder(tasks, now) {
+  if (!tasks.length) return null;
+  const verb = { water: 'watering', fertilize: 'feeding', photo: 'a progress photo' };
+  const ann = tasks.map((t) => ({ ...t, over: reminderOverdueDays(t.due, now) }));
+  if (ann.length === 1) {
+    const t = ann[0];
+    if (t.over >= 1) {
+      return { title: `🚨 ${t.name} is overdue`, body: `${t.over} day${t.over > 1 ? 's' : ''} overdue for ${verb[t.type]} — it's at risk.` };
+    }
+    return { title: '🌿 Plant care', body: `${t.name} needs ${verb[t.type]} today.` };
+  }
+  const n = (type) => ann.filter((t) => t.type === type).length;
   const parts = [];
   if (n('water')) parts.push(`${n('water')} to water`);
   if (n('fertilize')) parts.push(`${n('fertilize')} to feed`);
   if (n('photo')) parts.push(`${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
-  if (!parts.length) return;
-  await self.registration.showNotification('🌿 Plant care', {
-    body: `${parts.join(', ')} today.`,
+  let body = `${parts.join(', ')}.`;
+  const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
+  if (worst) body += ` ${worst.name} is ${worst.over} day${worst.over > 1 ? 's' : ''} overdue.`;
+  return { title: '🌿 Plant care', body };
+}
+
+async function runDailyReminderCheck() {
+  const digest = await idbGetMeta('reminderDigest');
+  if (!digest || !Array.isArray(digest.tasks)) return;
+  const now = new Date();
+  const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
+  // Due today or overdue.
+  const due = digest.tasks.filter((t) => {
+    const d = new Date(t.due); d.setHours(0, 0, 0, 0);
+    return d.getTime() <= startToday.getTime();
+  });
+  if (!due.length) { await idbPutMeta('notifyLog', {}); return; }
+
+  // Once-per-day de-dup, shared with the in-app notifier so the two never
+  // double-fire for the same plant on the same day.
+  const today = reminderDayKey(now);
+  const log = (await idbGetMeta('notifyLog')) || {};
+  const fresh = due.filter((t) => log[`${t.plantId}|${t.type}`] !== today);
+  const newLog = {};
+  for (const t of due) newLog[`${t.plantId}|${t.type}`] = today;
+  await idbPutMeta('notifyLog', newLog);
+  if (!fresh.length) return;
+
+  const msg = formatReminder(fresh, now);
+  if (!msg) return;
+  await self.registration.showNotification(msg.title, {
+    body: msg.body,
     tag: 'plant-care-daily',
     icon: './icons/icon-192.png',
     badge: './icons/icon-192.png',

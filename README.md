@@ -168,6 +168,15 @@ when closed — no cloud needed (the app writes a small "what's due" digest to
 IndexedDB that the service worker reads). iPhone/Safari don't allow background
 reminders without a push server, so there it stays open/reopen only.
 
+**Persistent, non-spammy nudges:** a plant you don't water doesn't get forgotten
+after one reminder — it's flagged **again the next day**, and the message
+**escalates** to name the at-risk plant and how many days overdue it is (e.g.
+"🚨 Snake Plant is overdue — 2 days overdue for watering — it's at risk").
+Crucially, each plant is reminded **at most once per calendar day**: reopening
+the app or an hourly re-check won't re-fire a notification you've already seen
+today, and the in-app and background notifiers share one daily log so they never
+double up. Once you water/feed it, the follow-ups stop automatically.
+
 **How users get the update:** the installed app checks for a new version when
 it's reopened/focused (and hourly). When one is found it shows a **"🌱 A new
 version is ready — Update"** banner; one tap reloads into the new version and
