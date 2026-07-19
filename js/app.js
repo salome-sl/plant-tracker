@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.18';
+const APP_VERSION = '1.3.19';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -149,12 +149,20 @@ async function runMigrations() {
 
 // Persist a lightweight "what's due" digest that the service worker reads for
 // background reminders (it can't run our seasonal math itself).
+//
+// We include tasks due within the next week, not just already-due ones: the
+// background worker only ever sees this digest (last written when the app was
+// open), so without a look-ahead a plant that crosses into "due" while the app
+// is closed would be invisible and never trigger a reminder. The SW gates each
+// task on its real due date (see sw.js), so listing upcoming tasks here never
+// fires a reminder early.
+const REMINDER_LOOKAHEAD_DAYS = 7;
 async function refreshReminderState() {
   try {
     const settings = getSettings();
     const now = new Date();
     const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
-    const tasks = dueTasks(plants, events, now, settings.hemisphere, 0)
+    const tasks = dueTasks(plants, events, now, settings.hemisphere, REMINDER_LOOKAHEAD_DAYS)
       .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
     const photoDue = plants.filter((p) => photoStatus(p, events, now).due)
       .map((p) => ({ plantId: p.id, name: p.name, type: 'photo', due: now.toISOString() }));
@@ -2359,9 +2367,29 @@ async function checkReminders() {
 
   const msg = formatReminder(fresh, now);
   if (!msg) return;
-  try {
-    new Notification(msg.title, { body: msg.body, tag: 'plant-care-daily' });
-  } catch { /* ignore */ }
+  await showReminderNotification(msg);
+}
+
+// Show a reminder notification. Chrome on Android FORBIDS the `new Notification()`
+// constructor (it throws "Illegal constructor") — notifications must be shown via
+// the service-worker registration. So prefer registration.showNotification()
+// everywhere, and fall back to the constructor only where no service worker is
+// available (some older desktop browsers). Matches the icon/badge the SW uses.
+async function showReminderNotification(msg) {
+  const opts = {
+    body: msg.body,
+    tag: 'plant-care-daily',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
+  };
+  if ('serviceWorker' in navigator) {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      await reg.showNotification(msg.title, opts);
+      return;
+    } catch { /* fall through to the constructor */ }
+  }
+  try { new Notification(msg.title, opts); } catch { /* ignore */ }
 }
 
 window.addEventListener('hashchange', render);
