@@ -10,6 +10,8 @@ const DEFAULTS = {
   apiKey: '',             // Anthropic API key for AI health checks (stored on-device)
   aiModel: 'claude-opus-4-8',
   feed: null,             // the fertilizer you use on all plants: { name, npk, minDays, maxDays, dilute }
+  lang: 'en',             // 'en' | 'nl'
+  units: 'metric',        // 'metric' (cm, °C) | 'imperial' (in, °F)
 };
 
 export function getSettings() {

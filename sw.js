@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v29';
+const CACHE = 'plant-tracker-v30';
 
 const ASSETS = [
   './',
@@ -21,6 +21,7 @@ const ASSETS = [
   './js/coach.js',
   './js/ai.js',
   './js/handoff.js',
+  './js/i18n.js',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

@@ -8,6 +8,8 @@
 // This module turns "today's date + hemisphere" into a season, and provides
 // the multiplier that stretches (or tightens) a plant's base watering interval.
 
+import { getLang } from './i18n.js';
+
 export const SEASONS = ['winter', 'spring', 'summer', 'autumn'];
 
 export const SEASON_META = {
@@ -69,14 +71,22 @@ export function shouldFeed(season, feedWinter = false) {
 export function seasonalExplanation(season, profile) {
   const mult = wateringMultiplier(season, profile.winterFactor);
   const feeding = shouldFeed(season, profile.feedWinter);
+  const nl = getLang() === 'nl';
+  const seasonNL = { winter: 'winterrust', spring: 'de lente', summer: 'de zomer', autumn: 'de herfst' }[season];
   const parts = [];
   if (mult > 1.05) {
-    parts.push(`watering stretched ${Math.round((mult - 1) * 100)}% for ${season} dormancy`);
+    parts.push(nl
+      ? `water geven ${Math.round((mult - 1) * 100)}% opgerekt voor ${seasonNL}`
+      : `watering stretched ${Math.round((mult - 1) * 100)}% for ${season} dormancy`);
   } else if (mult < 0.95) {
-    parts.push(`watering ${Math.round((1 - mult) * 100)}% more frequent for summer heat`);
+    parts.push(nl
+      ? `water geven ${Math.round((1 - mult) * 100)}% vaker vanwege de zomerhitte`
+      : `watering ${Math.round((1 - mult) * 100)}% more frequent for summer heat`);
   } else {
-    parts.push('watering at the normal growing-season pace');
+    parts.push(nl ? 'water geven op het normale groeiseizoentempo' : 'watering at the normal growing-season pace');
   }
-  parts.push(feeding ? 'feeding active' : 'feeding paused for the season');
+  parts.push(nl
+    ? (feeding ? 'voeden actief' : 'voeden gepauzeerd voor dit seizoen')
+    : (feeding ? 'feeding active' : 'feeding paused for the season'));
   return parts.join(' · ');
 }

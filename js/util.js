@@ -50,12 +50,24 @@ export function dateInputToISO(str) {
   return new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0).toISOString();
 }
 
+// Locale for dates and relative-time words. Set by the app from the language
+// setting (keeps util dependency-free — it doesn't import settings itself).
+let LOCALE = 'en';
+export function setLocale(l) { LOCALE = l === 'nl' ? 'nl' : 'en'; }
+
 export function fmtDate(d) {
   const date = new Date(d);
-  return date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  return date.toLocaleDateString(LOCALE === 'nl' ? 'nl-NL' : undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 export function fmtRelative(days) {
+  if (LOCALE === 'nl') {
+    if (days === 0) return 'vandaag';
+    if (days === 1) return 'morgen';
+    if (days === -1) return 'gisteren';
+    if (days < 0) return `${-days} dagen geleden`;
+    return `over ${days} dagen`;
+  }
   if (days === 0) return 'today';
   if (days === 1) return 'tomorrow';
   if (days === -1) return 'yesterday';

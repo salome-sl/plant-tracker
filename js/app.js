@@ -1,6 +1,7 @@
 // app.js — Router, views, and all UI for the Plant Care Tracker.
 
-import { el, clear, fmtDate, fmtRelative, todayISO, toDateInputValue, dateInputToISO, fileToResizedDataURL, download, dataUrlToPngBlob } from './util.js';
+import { el, clear, fmtDate, fmtRelative, todayISO, toDateInputValue, dateInputToISO, fileToResizedDataURL, download, dataUrlToPngBlob, setLocale } from './util.js';
+import { getLang, getUnits, localizeDOM, fmtTemp, fmtHeight, heightNum, heightUnit, heightToCm, t } from './i18n.js';
 import * as db from './db.js';
 import { SPECIES, LIGHT, getSpecies, profileFromSpecies, DEFAULT_PROFILE, allSpecies, isCustomSpecies, registerCustomSpecies } from './species.js';
 import { SYMPTOMS, getSymptom, tailorCauses, CATEGORY_LEAD, CATEGORY_NOUN } from './diagnostics.js';
@@ -15,7 +16,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.19';
+const APP_VERSION = '1.3.20';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -106,12 +107,14 @@ async function render() {
       window.scrollTo(0, 0);
       await r.handler(...m.slice(1));
       updateNav(hash);
+      localizeDOM(document.body); // translate the rendered view + nav when in Dutch
       refreshReminderState(); // keep the SW's reminder digest fresh (fire-and-forget)
       return;
     }
   }
   clear(app);
   app.append(el('div', { class: 'view' }, 'Not found'));
+  localizeDOM(document.body);
 }
 
 // One-time repairs for data saved by earlier versions. Guarded by a flag in the
@@ -708,7 +711,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
     careItem('☀️', 'Light', LIGHT[pr.light] || pr.light),
     careItem('💧', 'Water', `Every ${pr.water} days (growing season)`),
     careItem('💦', 'Humidity', pr.humidity),
-    careItem('🌡️', 'Min temp', `${pr.tempMin}°C`),
+    careItem('🌡️', 'Min temp', fmtTemp(pr.tempMin)),
     careItem('🌱', 'Feed', pr.fertilize ? `Every ${pr.fertilize} days in season` : 'Rarely'),
     careItem('🪴', 'Soil', pr.soil),
     careItem('🐾', 'Toxicity', pr.toxic),
@@ -758,14 +761,14 @@ route(/^\/plant\/(.+)$/, async (id) => {
     const minY = Math.min(...heightPts.map((p) => p.value));
     const maxY = Math.max(...heightPts.map((p) => p.value));
     view.append(el('div', { class: 'growth-head' }, [
-      el('span', { class: 'growth-latest' }, `${last.value} cm`),
+      el('span', { class: 'growth-latest' }, fmtHeight(last.value)),
       el('span', { class: `growth-change ${change >= 0 ? 'up' : 'down'}` },
-        `${change >= 0 ? '▲' : '▼'} ${Math.abs(change)} cm since ${fmtDate(first.date)}`),
+        `${change >= 0 ? '▲' : '▼'} ${heightNum(Math.abs(change))} ${heightUnit()} ${getLang() === 'nl' ? 'sinds' : 'since'} ${fmtDate(first.date)}`),
     ]));
     view.append(growthChart(heightPts));
-    view.append(el('div', { class: 'growth-caption' }, `${minY}–${maxY} cm · ${fmtDate(first.date)} → ${fmtDate(last.date)}`));
+    view.append(el('div', { class: 'growth-caption' }, `${heightNum(minY)}–${heightNum(maxY)} ${heightUnit()} · ${fmtDate(first.date)} → ${fmtDate(last.date)}`));
   } else if (heightPts.length === 1) {
-    view.append(el('div', { class: 'muted-box' }, `Latest height: ${heightPts[0].value} cm. Add another measurement to see the trend.`));
+    view.append(el('div', { class: 'muted-box' }, `${getLang() === 'nl' ? 'Laatste hoogte' : 'Latest height'}: ${fmtHeight(heightPts[0].value)}. ${getLang() === 'nl' ? 'Voeg nog een meting toe om de trend te zien.' : 'Add another measurement to see the trend.'}`));
   } else {
     view.append(el('div', { class: 'muted-box' }, 'Log its height over time to watch it grow.'));
   }
@@ -791,9 +794,11 @@ route(/^\/plant\/(.+)$/, async (id) => {
 
 function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused, onDo, onDoDated, doLabel, foot }) {
   const cls = STATE_CLASS[state] || 'muted';
+  const rel = fmtRelative(daysUntil);
   const whenText = paused ? 'Paused this season'
     : daysUntil < 0 ? `${-daysUntil} days overdue`
-    : daysUntil === 0 ? 'Due today' : `Due ${fmtRelative(daysUntil)}`;
+    : daysUntil === 0 ? 'Due today'
+    : getLang() === 'nl' ? rel.charAt(0).toUpperCase() + rel.slice(1) : `Due ${rel}`;
   return el('div', { class: `sched-card sched-${cls}` }, [
     el('div', { class: 'sched-head' }, [
       el('span', { class: 'sched-icon' }, icon),
@@ -918,6 +923,7 @@ function modal(contentNodes, { onClose } = {}) {
   const box = el('div', { class: 'modal' }, contentNodes);
   overlay.append(box);
   document.body.append(overlay);
+  localizeDOM(overlay); // dialogs live outside #app — translate them too
   function close() { overlay.remove(); if (onClose) onClose(); }
   return { close, overlay };
 }
@@ -1382,17 +1388,18 @@ function openGrowthDialog(plant) {
   const m = modal([
     el('h3', { class: 'modal-title' }, 'Log a measurement'),
     labeled('Date', dateInput),
-    labeled('Height (cm)', heightInput),
+    labeled(`Height (${heightUnit()})`, heightInput),
     labeled('Leaf count', leavesInput),
     labeled('Note', notes),
     el('div', { class: 'modal-actions' }, [
       el('button', { class: 'btn btn-ghost', onClick: () => m.close() }, 'Cancel'),
       el('button', { class: 'btn btn-primary', onClick: async () => {
-        const height = heightInput.value !== '' ? +heightInput.value : null;
+        // Store height canonically in cm; the input is in the chosen unit.
+        const height = heightInput.value !== '' ? heightToCm(heightInput.value) : null;
         const leaves = leavesInput.value !== '' ? +leavesInput.value : null;
         if (height == null && leaves == null && !notes.value.trim()) { toast('Enter a height or leaf count'); return; }
         const bits = [];
-        if (height != null) bits.push(`${height} cm`);
+        if (height != null) bits.push(fmtHeight(height));
         if (leaves != null) bits.push(`${leaves} leaves`);
         const noteStr = [bits.join(' · '), notes.value.trim()].filter(Boolean).join(' — ');
         await logCare(plant.id, 'growth', dateInput.value, {
@@ -1903,7 +1910,7 @@ route(/^\/guide\/(.+)$/, (id) => {
     careItem('💧', 'Water', `Every ${s.water} days (growing season)`),
     careItem('❄️', 'Winter', winterWords(s.winterFactor)),
     careItem('💦', 'Humidity', s.humidity),
-    careItem('🌡️', 'Min temp', `${s.tempMin}°C`),
+    careItem('🌡️', 'Min temp', fmtTemp(s.tempMin)),
     careItem('🌱', 'Feed', s.fertilize ? `Every ${s.fertilize} days in season` : 'Rarely'),
     careItem('🪴', 'Soil', s.soil),
     careItem('🐾', 'Toxicity', s.toxic),
@@ -2138,6 +2145,28 @@ route(/^\/settings$/, async () => {
   ]);
   themeSel.value = settings.theme;
   view.append(settingsGroup('Appearance', [labeled('Theme', themeSel)]));
+
+  // Language & units — changing either re-renders so it takes effect at once.
+  const langSel = el('select', { class: 'field', onChange: (e) => {
+    saveSettings({ lang: e.target.value }); setLocale(e.target.value); toast('Saved'); render();
+  } }, [
+    el('option', { value: 'en' }, 'English'),
+    el('option', { value: 'nl' }, 'Dutch'),
+  ]);
+  langSel.value = settings.lang || 'en';
+  const unitsSel = el('select', { class: 'field', onChange: (e) => {
+    saveSettings({ units: e.target.value }); toast('Saved'); render();
+  } }, [
+    el('option', { value: 'metric' }, 'Metric (cm, °C)'),
+    el('option', { value: 'imperial' }, 'Imperial (in, °F)'),
+  ]);
+  unitsSel.value = settings.units || 'metric';
+  view.append(settingsGroup('Measurements & language', [
+    labeled('Language', langSel),
+    el('div', { class: 'hint' }, 'Choose the app’s language.'),
+    labeled('Units', unitsSel),
+    el('div', { class: 'hint' }, 'Used for plant height and temperatures.'),
+  ]));
 
   // Notifications
   const notifBtn = el('button', { class: 'btn btn-secondary', onClick: async () => {
@@ -2396,6 +2425,7 @@ window.addEventListener('hashchange', render);
 
 async function boot() {
   applyTheme();
+  setLocale(getLang());
   // Capture the install opportunity and reflect it in the UI when it appears.
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();

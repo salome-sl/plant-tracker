@@ -142,6 +142,12 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   in the feed dialog — with a half-strength reminder so you don't over-feed. The
   app also **spaces feeding by plant type**: flowering plants and herbs (hungry
   feeders) are fed more often, foliage monthly-ish, and succulents/cacti least.
+- **Language — English or Dutch** — switch in **Settings → Measurements & language**.
+  The whole app translates, including the expert care tips, the symptom
+  troubleshooter, and the on-device care coach. English is the default.
+- **Units — metric or imperial** — plant heights (cm/in) and temperatures
+  (°C/°F) follow your choice. Heights are stored the same way underneath, so you
+  can switch any time without touching your data. Metric is the default.
 - **Reminders** — optional browser notifications while the app is open/reopened.
 - **Backup** — export/import your whole database as a JSON file.
 
