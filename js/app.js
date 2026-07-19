@@ -5,7 +5,7 @@ import * as db from './db.js';
 import { SPECIES, LIGHT, getSpecies, profileFromSpecies, DEFAULT_PROFILE, allSpecies, isCustomSpecies, registerCustomSpecies } from './species.js';
 import { SYMPTOMS, getSymptom } from './diagnostics.js';
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
-import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus } from './schedule.js';
+import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.13';
+const APP_VERSION = '1.3.14';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -609,7 +609,15 @@ route(/^\/plant\/(.+)$/, async (id) => {
       onDo: async () => { await logCare(id, 'fertilize'); toast('Feeding logged'); render(); },
       onDoDated: () => openLogDialog(plant, 'fertilize'),
       doLabel: 'Log feeding',
-      foot: settings.feed && settings.feed.name ? `🧪 ${settings.feed.name}` : null,
+      foot: (() => {
+        const parts = [];
+        if (settings.feed && settings.feed.name) parts.push(`🧪 ${settings.feed.name}`);
+        const sp = plant.speciesId ? getSpecies(plant.speciesId) : null;
+        const factor = feedCategoryFactor(sp ? sp.category : 'other');
+        if (factor < 1) parts.push('hungry feeder — fed more often');
+        else if (factor > 1) parts.push('light feeder — fed sparingly');
+        return parts.length ? parts.join(' · ') : null;
+      })(),
     }));
   }
   view.append(sched);
@@ -2024,7 +2032,7 @@ route(/^\/settings$/, async () => {
       el('div', { class: 'feed-range' }, [feedMin, el('span', {}, 'to'), feedMax]),
     ]),
     el('label', { class: 'checkline' }, [feedDilute, ' Use ~half strength for foliage plants (recommended)']),
-    el('div', { class: 'hint' }, 'Tip: label frequencies like “every 7–14 days” are calibrated for fast growth (flowers, veg). For most houseplants that’s aggressive — the app keeps a safer monthly-ish schedule and pauses feeding in winter. Feed heavy/flowering plants more often if you like.'),
+    el('div', { class: 'hint' }, 'The app spaces feeding by plant type automatically — flowering plants and herbs are fed more often, foliage plants monthly-ish, and succulents & cacti the least — and it pauses feeding in winter. Label frequencies like “every 7–14 days” are for fast growth, so keep foliage plants around half strength to avoid over-feeding.'),
   ]));
 
   // Data / backup

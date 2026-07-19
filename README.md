@@ -126,7 +126,9 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   as a preview you approve before anything changes.
 - **My plant food** — set the fertilizer you use once (in Settings) and it's shown
   everywhere the app tells you to feed — on the Feed card, in the Care Coach, and
-  in the feed dialog — with a half-strength reminder so you don't over-feed.
+  in the feed dialog — with a half-strength reminder so you don't over-feed. The
+  app also **spaces feeding by plant type**: flowering plants and herbs (hungry
+  feeders) are fed more often, foliage monthly-ish, and succulents/cacti least.
 - **Reminders** — optional browser notifications while the app is open/reopened.
 - **Backup** — export/import your whole database as a JSON file.
 

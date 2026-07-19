@@ -6,7 +6,7 @@
 
 import { getSpecies, LIGHT } from './species.js';
 import { seasonForDate, SEASON_META, shouldFeed } from './season.js';
-import { effectiveWaterInterval } from './schedule.js';
+import { effectiveWaterInterval, effectiveFeedInterval } from './schedule.js';
 
 // Deterministic pick so a given plant always gets the same phrasing.
 function hash(str) {
@@ -87,7 +87,7 @@ export function careTips(plant, settings, now = new Date()) {
     tips.push({
       icon: '🌱',
       text: feeding
-        ? `Feed with ${feedWith} about every ${p.fertilize} days while it's actively growing.`
+        ? `Feed with ${feedWith} about every ${effectiveFeedInterval(plant)} days while it's actively growing.`
         : `Hold off on fertilizer for now — feeding resumes in spring when growth picks back up.`,
     });
   }

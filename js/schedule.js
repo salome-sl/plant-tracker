@@ -1,8 +1,25 @@
 // schedule.js — Turns care logs + seasonal rules into due dates and status.
 
 import { wateringMultiplier, shouldFeed, seasonForDate } from './season.js';
+import { getSpecies } from './species.js';
 
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// How heavily a plant feeds, by category — multiplies its base feeding interval.
+// Flowering plants and herbs are hungry (feed more often → shorter interval);
+// succulents & cacti are light feeders (feed less often → longer interval).
+export function feedCategoryFactor(category) {
+  return { flowering: 0.6, herb: 0.55, succulent: 1.35 }[category] ?? 1.0;
+}
+
+// The feeding interval adjusted for the plant type (days).
+export function effectiveFeedInterval(plant) {
+  const base = plant.profile.fertilize;
+  if (!base) return base; // 0 = rarely fed
+  const s = plant.speciesId ? getSpecies(plant.speciesId) : null;
+  const category = s ? s.category : 'other';
+  return Math.max(1, Math.round(base * feedCategoryFactor(category)));
+}
 
 export function startOfDay(d = new Date()) {
   const x = new Date(d);
@@ -74,15 +91,16 @@ export function waterStatus(plant, events, now, hemisphere) {
 export function feedStatus(plant, events, now, hemisphere) {
   const profile = plant.profile;
   if (!profile.fertilize) return null; // this plant isn't fed on a schedule
+  const interval = effectiveFeedInterval(plant);
   const season = seasonForDate(now, hemisphere);
   const active = shouldFeed(season, profile.feedWinter);
   const last = lastEvent(events, plant.id, 'fertilize');
   const lastDate = last ? new Date(last.date) : (plant.acquiredDate ? new Date(plant.acquiredDate) : new Date(plant.createdAt));
-  const due = addDays(lastDate, profile.fertilize);
+  const due = addDays(lastDate, interval);
   const daysUntil = daysBetween(now, due);
   return {
     type: 'fertilize',
-    interval: profile.fertilize,
+    interval,
     lastDate,
     due,
     daysUntil,
