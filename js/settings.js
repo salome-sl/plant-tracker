@@ -9,6 +9,7 @@ const DEFAULTS = {
   theme: 'auto',          // 'auto' | 'light' | 'dark'
   apiKey: '',             // Anthropic API key for AI health checks (stored on-device)
   aiModel: 'claude-opus-4-8',
+  feed: null,             // the fertilizer you use on all plants: { name, npk, minDays, maxDays, dilute }
 };
 
 export function getSettings() {

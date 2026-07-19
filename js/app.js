@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.12';
+const APP_VERSION = '1.3.13';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -609,6 +609,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
       onDo: async () => { await logCare(id, 'fertilize'); toast('Feeding logged'); render(); },
       onDoDated: () => openLogDialog(plant, 'fertilize'),
       doLabel: 'Log feeding',
+      foot: settings.feed && settings.feed.name ? `🧪 ${settings.feed.name}` : null,
     }));
   }
   view.append(sched);
@@ -723,7 +724,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
   app.append(view);
 });
 
-function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused, onDo, onDoDated, doLabel }) {
+function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused, onDo, onDoDated, doLabel, foot }) {
   const cls = STATE_CLASS[state] || 'muted';
   const whenText = paused ? 'Paused this season'
     : daysUntil < 0 ? `${-daysUntil} days overdue`
@@ -735,6 +736,7 @@ function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused,
       el('span', { class: `sched-when when-${cls}` }, whenText),
     ]),
     el('div', { class: 'sched-sub' }, `${every} · last: ${last}`),
+    foot ? el('div', { class: 'sched-foot' }, foot) : null,
     el('div', { class: 'sched-actions' }, [
       el('button', { class: 'sched-do', onClick: onDo }, doLabel),
       onDoDated ? el('button', { class: 'sched-date-btn', title: 'Log on a specific date', onClick: onDoDated }, '📅') : null,
@@ -747,8 +749,13 @@ function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused,
 function openLogDialog(plant, type) {
   const isWater = type === 'water';
   const dateInput = el('input', { type: 'date', value: todayISO(), max: todayISO(), class: 'field' });
+  const feed = getSettings().feed;
+  const feedNote = (!isWater && feed && feed.name)
+    ? el('div', { class: 'tips-box small' }, `🧪 Feed with ${feed.name}${feed.npk ? ` (${feed.npk})` : ''}.${feed.dilute ? ' Use about half strength for foliage plants to avoid over-feeding.' : ''}`)
+    : null;
   const m = modal([
     el('h3', { class: 'modal-title' }, isWater ? 'Log watering' : 'Log feeding'),
+    feedNote,
     labeled(`When did you ${isWater ? 'water' : 'feed'} it?`, dateInput),
     el('div', { class: 'hint' }, 'Pick the day it actually happened so your schedule stays accurate.'),
     el('div', { class: 'modal-actions' }, [
@@ -1978,6 +1985,46 @@ route(/^\/settings$/, async () => {
       'Get a key at ', el('b', {}, 'console.anthropic.com'), '. It’s stored only in this browser and used only for your health checks. ',
       'This is the one feature that sends data off your device: the photo you choose is sent to Anthropic for analysis.',
     ]),
+  ]));
+
+  // My plant food — one fertilizer used across all plants.
+  const feed = settings.feed || {};
+  const feedName = el('input', { class: 'field', placeholder: 'e.g. Miracle-Gro All Purpose', value: feed.name || '' });
+  const feedNpk = el('input', { class: 'field', placeholder: 'e.g. 24-8-16 (optional)', value: feed.npk || '' });
+  const feedMin = el('input', { type: 'number', min: '1', class: 'field', placeholder: '7', value: feed.minDays || '' });
+  const feedMax = el('input', { type: 'number', min: '1', class: 'field', placeholder: '14', value: feed.maxDays || '' });
+  const feedDilute = el('input', { type: 'checkbox' });
+  feedDilute.checked = feed.dilute !== false; // default on (safer for houseplants)
+  const saveFeed = () => {
+    const name = feedName.value.trim();
+    saveSettings({ feed: name ? {
+      name, npk: feedNpk.value.trim(),
+      minDays: +feedMin.value || null, maxDays: +feedMax.value || null,
+      dilute: feedDilute.checked,
+    } : null });
+    toast('Saved');
+  };
+  [feedName, feedNpk, feedMin, feedMax].forEach((i) => i.addEventListener('change', saveFeed));
+  feedDilute.addEventListener('change', saveFeed);
+  const usePreset = el('button', { class: 'btn btn-secondary full', onClick: () => {
+    feedName.value = 'Miracle-Gro Watering Can Singles';
+    feedNpk.value = '24-8-16';
+    feedMin.value = '7'; feedMax.value = '14';
+    feedDilute.checked = true;
+    saveFeed();
+  } }, '🧪 Use Miracle-Gro Watering Can Singles');
+
+  view.append(settingsGroup('My plant food', [
+    el('div', { class: 'hint' }, 'The fertilizer you use on all your plants. It’s shown whenever the app tells you to feed, so you always know what (and how) to use.'),
+    usePreset,
+    labeled('Product name', feedName),
+    labeled('N-P-K (optional)', feedNpk),
+    el('div', { class: 'form-row' }, [
+      el('span', { class: 'form-label' }, 'Label says feed every … days'),
+      el('div', { class: 'feed-range' }, [feedMin, el('span', {}, 'to'), feedMax]),
+    ]),
+    el('label', { class: 'checkline' }, [feedDilute, ' Use ~half strength for foliage plants (recommended)']),
+    el('div', { class: 'hint' }, 'Tip: label frequencies like “every 7–14 days” are calibrated for fast growth (flowers, veg). For most houseplants that’s aggressive — the app keeps a safer monthly-ish schedule and pauses feeding in winter. Feed heavy/flowering plants more often if you like.'),
   ]));
 
   // Data / backup

@@ -80,10 +80,14 @@ export function careTips(plant, settings, now = new Date()) {
   });
 
   if (p.fertilize) {
+    const feed = settings.feed;
+    const feedWith = (feed && feed.name)
+      ? `${feed.name}${feed.dilute ? ' at about half strength' : ''}`
+      : 'a balanced fertilizer at half strength';
     tips.push({
       icon: '🌱',
       text: feeding
-        ? `Feed a balanced fertilizer at half strength about every ${p.fertilize} days while it's actively growing.`
+        ? `Feed with ${feedWith} about every ${p.fertilize} days while it's actively growing.`
         : `Hold off on fertilizer for now — feeding resumes in spring when growth picks back up.`,
     });
   }

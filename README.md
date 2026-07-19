@@ -124,6 +124,9 @@ phone, use **Settings → Export backup** on the PC and **Import backup** on the
   app **imports the findings** (updating the schedule and saving a health note).
   Parsing is done entirely on‑device (no extra API call), and every import is shown
   as a preview you approve before anything changes.
+- **My plant food** — set the fertilizer you use once (in Settings) and it's shown
+  everywhere the app tells you to feed — on the Feed card, in the Care Coach, and
+  in the feed dialog — with a half-strength reminder so you don't over-feed.
 - **Reminders** — optional browser notifications while the app is open/reopened.
 - **Backup** — export/import your whole database as a JSON file.
 
