@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v32';
+const CACHE = 'plant-tracker-v33';
 
 const ASSETS = [
   './',
@@ -114,31 +114,52 @@ function reminderOverdueDays(dueISO, now) {
 }
 function formatReminder(tasks, now, lang) {
   if (!tasks.length) return null;
-  const nl = lang === 'nl';
-  const verb = nl
-    ? { water: 'water geven', fertilize: 'voeden', photo: 'een voortgangsfoto' }
-    : { water: 'watering', fertilize: 'feeding', photo: 'a progress photo' };
-  const days = (n) => nl ? `${n} dag${n === 1 ? '' : 'en'}` : `${n} day${n === 1 ? '' : 's'}`;
   const ann = tasks.map((t) => ({ ...t, over: reminderOverdueDays(t.due, now) }));
-  const title = nl ? '🌿 Plantenzorg' : '🌿 Plant care';
+  return lang === 'nl' ? reminderNL(ann) : reminderEN(ann);
+}
+
+// Idiomatic Dutch — written natively, not translated from the English.
+function reminderNL(ann) {
+  const dagen = (n) => `${n} dag${n === 1 ? '' : 'en'}`;
   if (ann.length === 1) {
     const t = ann[0];
     if (t.over >= 1) {
-      return nl
-        ? { title: `🚨 ${t.name} is te laat`, body: `${days(t.over)} te laat voor ${verb[t.type]} — het loopt gevaar.` }
-        : { title: `🚨 ${t.name} is overdue`, body: `${days(t.over)} overdue for ${verb[t.type]} — it's at risk.` };
+      if (t.type === 'water') return { title: `🚨 ${t.name} snakt naar water`, body: `Al ${dagen(t.over)} te laat — geef 'm snel water, anders loopt 'ie gevaar.` };
+      if (t.type === 'fertilize') return { title: `🌱 ${t.name} heeft voeding nodig`, body: `Al ${dagen(t.over)} te laat met voeden.` };
+      return { title: `📸 Tijd voor een nieuwe foto`, body: `Je hebt ${t.name} al ${dagen(t.over)} niet vastgelegd.` };
     }
-    return { title, body: nl ? `${t.name} heeft vandaag ${verb[t.type]} nodig.` : `${t.name} needs ${verb[t.type]} today.` };
+    if (t.type === 'water') return { title: '🌿 Plantenzorg', body: `${t.name} wil vandaag water.` };
+    if (t.type === 'fertilize') return { title: '🌿 Plantenzorg', body: `${t.name} is vandaag toe aan voeding.` };
+    return { title: '🌿 Plantenzorg', body: `Maak vandaag een nieuwe foto van ${t.name}.` };
   }
   const n = (type) => ann.filter((t) => t.type === type).length;
   const parts = [];
-  if (n('water')) parts.push(nl ? `${n('water')} water geven` : `${n('water')} to water`);
-  if (n('fertilize')) parts.push(nl ? `${n('fertilize')} voeden` : `${n('fertilize')} to feed`);
-  if (n('photo')) parts.push(nl ? `${n('photo')} voortgangsfoto${n('photo') > 1 ? "'s" : ''}` : `${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
+  if (n('water')) parts.push(`${n('water')} ${n('water') === 1 ? 'plant' : 'planten'} water geven`);
+  if (n('fertilize')) parts.push(`${n('fertilize')} ${n('fertilize') === 1 ? 'plant' : 'planten'} voeden`);
+  if (n('photo')) parts.push(`${n('photo')} nieuwe foto${n('photo') === 1 ? '' : "'s"}`);
   let body = `${parts.join(', ')}.`;
   const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
-  if (worst) body += nl ? ` ${worst.name} is ${days(worst.over)} te laat.` : ` ${worst.name} is ${days(worst.over)} overdue.`;
-  return { title, body };
+  if (worst) body += ` ${worst.name} wacht al ${dagen(worst.over)}.`;
+  return { title: '🌿 Plantenzorg', body };
+}
+
+function reminderEN(ann) {
+  const verb = { water: 'watering', fertilize: 'feeding', photo: 'a progress photo' };
+  const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
+  if (ann.length === 1) {
+    const t = ann[0];
+    if (t.over >= 1) return { title: `🚨 ${t.name} is overdue`, body: `${days(t.over)} overdue for ${verb[t.type]} — it's at risk.` };
+    return { title: '🌿 Plant care', body: `${t.name} needs ${verb[t.type]} today.` };
+  }
+  const n = (type) => ann.filter((t) => t.type === type).length;
+  const parts = [];
+  if (n('water')) parts.push(`${n('water')} to water`);
+  if (n('fertilize')) parts.push(`${n('fertilize')} to feed`);
+  if (n('photo')) parts.push(`${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
+  let body = `${parts.join(', ')}.`;
+  const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
+  if (worst) body += ` ${worst.name} is ${days(worst.over)} overdue.`;
+  return { title: '🌿 Plant care', body };
 }
 
 async function runDailyReminderCheck() {
