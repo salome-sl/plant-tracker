@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v30';
+const CACHE = 'plant-tracker-v31';
 
 const ASSETS = [
   './',
@@ -112,26 +112,33 @@ function reminderOverdueDays(dueISO, now) {
   const s = (x) => { const y = new Date(x); y.setHours(0, 0, 0, 0); return y.getTime(); };
   return Math.round((s(now) - s(dueISO)) / (24 * 60 * 60 * 1000));
 }
-function formatReminder(tasks, now) {
+function formatReminder(tasks, now, lang) {
   if (!tasks.length) return null;
-  const verb = { water: 'watering', fertilize: 'feeding', photo: 'a progress photo' };
+  const nl = lang === 'nl';
+  const verb = nl
+    ? { water: 'water geven', fertilize: 'voeden', photo: 'een voortgangsfoto' }
+    : { water: 'watering', fertilize: 'feeding', photo: 'a progress photo' };
+  const days = (n) => nl ? `${n} dag${n === 1 ? '' : 'en'}` : `${n} day${n === 1 ? '' : 's'}`;
   const ann = tasks.map((t) => ({ ...t, over: reminderOverdueDays(t.due, now) }));
+  const title = nl ? '🌿 Plantenzorg' : '🌿 Plant care';
   if (ann.length === 1) {
     const t = ann[0];
     if (t.over >= 1) {
-      return { title: `🚨 ${t.name} is overdue`, body: `${t.over} day${t.over > 1 ? 's' : ''} overdue for ${verb[t.type]} — it's at risk.` };
+      return nl
+        ? { title: `🚨 ${t.name} is te laat`, body: `${days(t.over)} te laat voor ${verb[t.type]} — het loopt gevaar.` }
+        : { title: `🚨 ${t.name} is overdue`, body: `${days(t.over)} overdue for ${verb[t.type]} — it's at risk.` };
     }
-    return { title: '🌿 Plant care', body: `${t.name} needs ${verb[t.type]} today.` };
+    return { title, body: nl ? `${t.name} heeft vandaag ${verb[t.type]} nodig.` : `${t.name} needs ${verb[t.type]} today.` };
   }
   const n = (type) => ann.filter((t) => t.type === type).length;
   const parts = [];
-  if (n('water')) parts.push(`${n('water')} to water`);
-  if (n('fertilize')) parts.push(`${n('fertilize')} to feed`);
-  if (n('photo')) parts.push(`${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
+  if (n('water')) parts.push(nl ? `${n('water')} water geven` : `${n('water')} to water`);
+  if (n('fertilize')) parts.push(nl ? `${n('fertilize')} voeden` : `${n('fertilize')} to feed`);
+  if (n('photo')) parts.push(nl ? `${n('photo')} voortgangsfoto${n('photo') > 1 ? "'s" : ''}` : `${n('photo')} progress photo${n('photo') > 1 ? 's' : ''}`);
   let body = `${parts.join(', ')}.`;
   const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
-  if (worst) body += ` ${worst.name} is ${worst.over} day${worst.over > 1 ? 's' : ''} overdue.`;
-  return { title: '🌿 Plant care', body };
+  if (worst) body += nl ? ` ${worst.name} is ${days(worst.over)} te laat.` : ` ${worst.name} is ${days(worst.over)} overdue.`;
+  return { title, body };
 }
 
 async function runDailyReminderCheck() {
@@ -156,7 +163,7 @@ async function runDailyReminderCheck() {
   await idbPutMeta('notifyLog', newLog);
   if (!fresh.length) return;
 
-  const msg = formatReminder(fresh, now);
+  const msg = formatReminder(fresh, now, digest.lang || 'en');
   if (!msg) return;
   await self.registration.showNotification(msg.title, {
     body: msg.body,
