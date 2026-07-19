@@ -5,7 +5,7 @@ import * as db from './db.js';
 import { SPECIES, LIGHT, getSpecies, profileFromSpecies, DEFAULT_PROFILE, allSpecies, isCustomSpecies, registerCustomSpecies } from './species.js';
 import { SYMPTOMS, getSymptom } from './diagnostics.js';
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
-import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor } from './schedule.js';
+import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, MS_PER_DAY } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
@@ -15,7 +15,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.14';
+const APP_VERSION = '1.3.15';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -112,6 +112,39 @@ async function render() {
   }
   clear(app);
   app.append(el('div', { class: 'view' }, 'Not found'));
+}
+
+// One-time repairs for data saved by earlier versions. Guarded by a flag in the
+// meta store so each migration runs at most once per device.
+async function runMigrations() {
+  let done;
+  try { done = (await db.getMeta('migrations')) || {}; } catch { return; }
+
+  // v1: an early build dated the auto "Starting photo" at the acquired date
+  // (sometimes years ago) instead of when the photo was actually added, making
+  // fresh plants look wildly overdue for a progress photo. Re-date those to when
+  // the plant was created, and backfill a starting photo for plants that have a
+  // main image but no photo event at all.
+  if (!done.photoStartDates) {
+    try {
+      const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
+      for (const p of plants) {
+        const created = new Date(p.createdAt);
+        const photoEvents = events.filter((e) => e.plantId === p.id && e.type === 'photo');
+        for (const e of photoEvents) {
+          if (e.notes === 'Starting photo' && (created - new Date(e.date)) > 2 * MS_PER_DAY) {
+            e.date = created.toISOString();
+            await db.putEvent(e);
+          }
+        }
+        if (p.photo && photoEvents.length === 0) {
+          await db.putEvent({ id: db.uid('ev'), plantId: p.id, type: 'photo', date: created.toISOString(), photo: p.photo, notes: 'Starting photo' });
+        }
+      }
+      done.photoStartDates = true;
+      await db.putMeta('migrations', done);
+    } catch { /* leave unflagged so it retries next launch */ }
+  }
 }
 
 // Persist a lightweight "what's due" digest that the service worker reads for
@@ -2160,6 +2193,7 @@ async function boot() {
     render();
   });
   await db.openDB();
+  await runMigrations();
   await reloadCustomSpecies();
   await render();
   // Check reminders shortly after open, then hourly while the app stays open.
