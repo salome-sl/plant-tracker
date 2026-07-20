@@ -262,6 +262,103 @@ export function wateringAmount(plant) {
   return byLang[nl ? 'nl' : 'en'];
 }
 
+// Pruning & repotting guidance — for "when the time gets there". Unlike watering,
+// neither is on a fixed clock: pruning is mostly seasonal timing + plant type,
+// and repotting is driven by growth (root-bound) + time, not pot size. The app
+// can't see roots, so this PROMPTS the user at the right season and tells them
+// what to look for, rather than claiming to know a plant needs it. Keyed by
+// plant type for the technique, with a season-aware "is now a good time" nudge.
+
+// The technique — what pruning/repotting looks like for this type of plant.
+const PRUNE_BY_CAT = {
+  'tropical-foliage': {
+    en: 'Prune in early spring to shape it and keep its size in check — cut just above a leaf node. Trimming long, leggy vines keeps it full and bushy, and the cuttings will usually root in water.',
+    nl: 'Snoei in het vroege voorjaar om \'m in vorm te houden en niet te groot te laten worden — knip net boven een bladknoop. Lange, kale ranken terugknippen houdt \'m vol en bossig, en de stekjes wortelen meestal zo in water.',
+  },
+  succulent: {
+    en: 'Barely needs pruning — just remove any shrivelled, mushy or damaged leaves. If it\'s stretching and leggy, that\'s a cry for more light, not a haircut.',
+    nl: 'Hoeft nauwelijks gesnoeid te worden — haal alleen verschrompelde, zachte of beschadigde blaadjes weg. Wordt hij lang en slierterig, dan wil hij meer licht, geen snoeibeurt.',
+  },
+  fern: {
+    en: 'Don\'t prune it for shape — just snip brown or tired fronds off at the base. Fresh fronds keep unfurling from the centre.',
+    nl: 'Niet snoeien voor de vorm — knip alleen bruine of uitgeputte bladeren bij de voet weg. Vanuit het hart komen steeds nieuwe bladeren.',
+  },
+  orchid: {
+    en: 'Once the last flower drops, cut the spent flower spike back. Leave the leaves and healthy roots alone — save trimming any dead roots for repotting day.',
+    nl: 'Als de laatste bloem is gevallen, knip je de uitgebloeide bloemstengel terug. Laat de bladeren en gezonde wortels met rust — dode wortels bijknippen doe je bij het verpotten.',
+  },
+  flowering: {
+    en: 'Remove spent blooms as they fade to encourage more, and pinch back leggy stems after the main flush to keep it compact.',
+    nl: 'Haal uitgebloeide bloemen weg zodra ze verwelken, dat stimuleert nieuwe. Knip kale stengels na de hoofdbloei terug om \'m compact te houden.',
+  },
+  herb: {
+    en: 'Pinch and harvest the tips often — it keeps the plant bushy and delays bolting. Snip off any flower buds as soon as they appear to keep the leaves coming.',
+    nl: 'Knijp en oogst de topjes vaak — dat houdt de plant bossig en stelt het doorschieten uit. Knip bloemknoppen weg zodra ze verschijnen, dan blijf je blad houden.',
+  },
+  other: {
+    en: 'Prune lightly in early spring to shape it and remove dead or leggy growth — cut just above a node. Tidy away dead leaves whenever you spot them.',
+    nl: 'Snoei licht in het vroege voorjaar om \'m in vorm te brengen en dode of kale groei weg te halen — knip net boven een knoop. Dode blaadjes mag je altijd weghalen.',
+  },
+};
+
+const REPOT_BY_CAT = {
+  'tropical-foliage': {
+    en: 'Repot every 1–2 years, or sooner if roots circle the pot or poke out the drainage holes and water runs straight through. Move up just one pot size and refresh the soil.',
+    nl: 'Verpot elke 1–2 jaar, of eerder als de wortels rond de pot draaien of onderuit de gaatjes komen en het water er zo doorheen loopt. Ga maar één maat groter en ververs de aarde.',
+  },
+  succulent: {
+    en: 'A slow grower — repot only every 2–3 years or when it\'s clearly crowded. Use fresh gritty mix and keep the pot snug; an oversized pot stays wet and rots the roots.',
+    nl: 'Een langzame groeier — verpot maar eens in de 2–3 jaar of als hij duidelijk te krap zit. Gebruik verse gritrijke aarde en houd de pot krap; een te grote pot blijft nat en laat de wortels rotten.',
+  },
+  fern: {
+    en: 'Repot every 1–2 years once it fills the pot. Ferns like being a little snug and in fresh, moisture-retentive soil.',
+    nl: 'Verpot elke 1–2 jaar zodra hij de pot vult. Varens houden van een beetje krap zitten en van verse, vochtvasthoudende aarde.',
+  },
+  orchid: {
+    en: 'Repot every 1–2 years into fresh orchid bark (never regular soil), ideally just after flowering. Don\'t leave it sitting in old, broken-down, soggy bark.',
+    nl: 'Verpot elke 1–2 jaar in verse orchideeënbast (nooit gewone potgrond), het liefst net na de bloei. Laat \'m niet in oude, afgebroken, natte bast zitten.',
+  },
+  flowering: {
+    en: 'Repot every 1–2 years, or when it becomes root-bound. Go up only one pot size so the extra soil doesn\'t stay soggy.',
+    nl: 'Verpot elke 1–2 jaar, of als hij te krap zit. Ga maar één maat groter zodat de extra aarde niet nat blijft staan.',
+  },
+  herb: {
+    en: 'A fast grower — pot on whenever the roots fill the pot. Many herbs are happiest planted outdoors or simply replaced each season.',
+    nl: 'Een snelle groeier — verpot zodra de wortels de pot vullen. Veel kruiden staan het liefst buiten of vervang je gewoon elk seizoen.',
+  },
+  other: {
+    en: 'Repot every 1–2 years, or when roots start circling or growing out the drainage holes. Move up just one pot size and refresh the soil.',
+    nl: 'Verpot elke 1–2 jaar, of als de wortels gaan draaien of uit de gaatjes groeien. Ga maar één maat groter en ververs de aarde.',
+  },
+};
+
+// Is now a good time? — a short season-aware nudge appended to the technique.
+const PRUNE_SEASON = {
+  spring: { en: 'Right now, in spring, is a great time if it needs it.', nl: 'Nu, in de lente, is een prima moment als het nodig is.' },
+  summer: { en: 'In summer keep it to light trims — save any hard pruning for early spring.', nl: 'Houd het in de zomer bij lichte snoei — bewaar flink snoeien voor het vroege voorjaar.' },
+  autumn: { en: 'Heading into autumn, just tidy dead growth and hold bigger cuts until spring.', nl: 'Nu het herfst wordt: ruim alleen dood blad op en bewaar flink snoeien voor de lente.' },
+  winter: { en: 'It\'s resting now, so avoid big cuts until late winter or early spring.', nl: 'Hij rust nu, dus wacht met flink snoeien tot het late voorjaar.' },
+};
+
+const REPOT_SEASON = {
+  spring: { en: 'Spring is the ideal window, so if it\'s due, now\'s the time.', nl: 'De lente is hét moment, dus als het nodig is: nu doen.' },
+  summer: { en: 'Early summer is still fine if it\'s clearly root-bound.', nl: 'De vroege zomer kan nog prima als hij duidelijk te krap zit.' },
+  autumn: { en: 'Better to wait for spring now unless it\'s badly root-bound.', nl: 'Wacht liever tot de lente, tenzij hij echt te krap zit.' },
+  winter: { en: 'Avoid repotting mid-winter — wait for spring unless it\'s urgent.', nl: 'Verpot niet midden in de winter — wacht op de lente, tenzij het dringend is.' },
+};
+
+export function pruningRepotTips(plant, settings, now = new Date()) {
+  const lang = getLang() === 'nl' ? 'nl' : 'en';
+  const cat = plantCategory(plant);
+  const season = seasonForDate(now, settings.hemisphere);
+  const prune = (PRUNE_BY_CAT[cat] || PRUNE_BY_CAT.other)[lang];
+  const repot = (REPOT_BY_CAT[cat] || REPOT_BY_CAT.other)[lang];
+  return [
+    { icon: '✂️', text: `${prune} ${PRUNE_SEASON[season][lang]}` },
+    { icon: '🪴', text: `${repot} ${REPOT_SEASON[season][lang]}` },
+  ];
+}
+
 // Flag a manually-entered schedule that's well outside the species' known-good
 // range — a likely mistake — without ever forcing a change. Only applies when a
 // species is known (custom plants have no reference to compare against).

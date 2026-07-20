@@ -8,7 +8,7 @@ import { SYMPTOMS, getSymptom, tailorCauses, CATEGORY_LEAD, CATEGORY_NOUN } from
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, plantCategory, MS_PER_DAY } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
-import { welcomeMessage, careTips, scheduleWarnings, wateringAmount } from './coach.js';
+import { welcomeMessage, careTips, scheduleWarnings, wateringAmount, pruningRepotTips } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
@@ -705,6 +705,18 @@ route(/^\/plant\/(.+)$/, async (id) => {
     el('div', { class: 'coach-body' }, [
       el('div', { class: 'coach-msg' }, welcomeMessage(plant, settings, now)),
       el('ul', { class: 'coach-tips' }, coachTips.map((t) =>
+        el('li', {}, [el('span', { class: 'coach-tip-icon' }, t.icon), el('span', {}, t.text)]),
+      )),
+    ]),
+  ]));
+
+  // Pruning & repotting — seasonal, plant-type guidance for "when the time comes".
+  const prTips = pruningRepotTips(plant, settings, now);
+  view.append(el('h2', { class: 'section-title' }, 'Pruning & repotting'));
+  view.append(el('div', { class: 'coach-card' }, [
+    el('div', { class: 'coach-avatar' }, '✂️'),
+    el('div', { class: 'coach-body' }, [
+      el('ul', { class: 'coach-tips' }, prTips.map((t) =>
         el('li', {}, [el('span', { class: 'coach-tip-icon' }, t.icon), el('span', {}, t.text)]),
       )),
     ]),
