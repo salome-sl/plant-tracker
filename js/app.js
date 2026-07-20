@@ -8,7 +8,7 @@ import { SYMPTOMS, getSymptom, tailorCauses, CATEGORY_LEAD, CATEGORY_NOUN } from
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, plantCategory, MS_PER_DAY } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
-import { welcomeMessage, careTips, scheduleWarnings } from './coach.js';
+import { welcomeMessage, careTips, scheduleWarnings, wateringAmount } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
@@ -660,6 +660,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
     onDo: async () => { await logCare(id, 'water'); toast('Watering logged'); render(); },
     onDoDated: () => openLogDialog(plant, 'water'),
     doLabel: 'Log watering',
+    foot: `💧 ${wateringAmount(plant).label}`,
   }));
   if (f) {
     sched.append(scheduleCard({
@@ -824,9 +825,13 @@ function openLogDialog(plant, type) {
   const feedNote = (!isWater && feed && feed.name)
     ? el('div', { class: 'tips-box small' }, `🧪 Feed with ${feed.name}${feed.npk ? ` (${feed.npk})` : ''}.${feed.dilute ? ' Use about half strength for foliage plants to avoid over-feeding.' : ''}`)
     : null;
+  const waterNote = isWater
+    ? el('div', { class: 'tips-box small' }, `💧 ${wateringAmount(plant).text}`)
+    : null;
   const m = modal([
     el('h3', { class: 'modal-title' }, isWater ? 'Log watering' : 'Log feeding'),
     feedNote,
+    waterNote,
     labeled(`When did you ${isWater ? 'water' : 'feed'} it?`, dateInput),
     el('div', { class: 'hint' }, 'Pick the day it actually happened so your schedule stays accurate.'),
     el('div', { class: 'modal-actions' }, [

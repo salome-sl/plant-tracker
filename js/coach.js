@@ -6,7 +6,7 @@
 
 import { getSpecies, LIGHT } from './species.js';
 import { seasonForDate, SEASON_META, shouldFeed } from './season.js';
-import { effectiveWaterInterval, effectiveFeedInterval } from './schedule.js';
+import { effectiveWaterInterval, effectiveFeedInterval, plantCategory } from './schedule.js';
 import { getLang, tl } from './i18n.js';
 
 const SEASON_LABEL_NL = { spring: 'lente', summer: 'zomer', autumn: 'herfst', winter: 'winter' };
@@ -107,6 +107,10 @@ export function careTips(plant, settings, now = new Date()) {
       : `Water roughly every ${interval} day${interval === 1 ? '' : 's'} this season — let the soil dry to the right depth between drinks rather than watering on a strict clock.`,
   });
 
+  // How much, not just how often — the other half of watering, and the part that
+  // stops people drowning a plant with daily splashes.
+  tips.push({ icon: '🚿', text: wateringAmount(plant).text });
+
   tips.push({
     icon: '☀️',
     text: nl
@@ -149,6 +153,93 @@ export function careTips(plant, settings, now = new Date()) {
   }
 
   return tips;
+}
+
+// How MUCH to water — the missing half of watering guidance. The schedule tells
+// you when; this tells you the amount and method so people don't drown a plant
+// with daily splashes (the #1 way houseplants die). Keyed by plant type, because
+// "how much" is a property of the type: succulents want soak-and-dry, ferns want
+// evenly moist, most tropicals want a thorough drench then a partial dry-down.
+// Returns { label } — a short method tag for compact spots — and { text } — the
+// full plain-language guidance. "Until it drains from the bottom" scales the
+// volume to the pot on its own, which is why it beats naming a fixed amount.
+const WATER_AMOUNT = {
+  succulent: {
+    en: {
+      label: 'Soak & dry — never a daily splash',
+      text: 'Give it a proper soak — water until it runs out the drainage holes, then don\'t water again until the soil is bone dry (often a week or two). A daily splash is what rots succulents; one big drink followed by a long dry spell is what they actually want.',
+    },
+    nl: {
+      label: 'Doordrenken en laten opdrogen',
+      text: 'Geef \'m een flinke plens — water tot het onderuit de pot loopt en geef daarna pas weer water als de aarde kurkdroog is (vaak pas na een week of twee). Een dagelijks scheutje laat vetplanten rotten; één grote slok en dan lang droog is precies wat ze willen.',
+    },
+  },
+  fern: {
+    en: {
+      label: 'Keep evenly moist',
+      text: 'Water little and often to keep the soil evenly moist — never let it dry out completely, but never leave it standing in water either. A thorough drink whenever the surface starts to feel dry is about right.',
+    },
+    nl: {
+      label: 'Gelijkmatig vochtig houden',
+      text: 'Geef kleine beetjes maar regelmatig, zodat de aarde gelijkmatig vochtig blijft — laat \'m nooit helemaal uitdrogen, maar laat \'m ook niet in het water staan. Een goede slok zodra de bovenkant droog begint te voelen is precies goed.',
+    },
+  },
+  orchid: {
+    en: {
+      label: 'Soak the bark, then drain fully',
+      text: 'Soak the bark thoroughly, then let every drop drain away — never leave water sitting in the pot or in the crown. It\'s a good drench and a full drain, not a daily trickle.',
+    },
+    nl: {
+      label: 'Bast doorweken, dan laten uitlekken',
+      text: 'Laat de bast goed doorweken en laat daarna elke druppel weglopen — laat nooit water in de pot of in het hart staan. Het is flink doorspoelen en volledig laten uitlekken, geen dagelijks straaltje.',
+    },
+  },
+  herb: {
+    en: {
+      label: 'Keep moist — water generously',
+      text: 'Herbs are thirsty — water generously whenever the surface starts to dry, until it drains from the bottom. Keep the soil consistently moist, but tip out any water left standing in the saucer.',
+    },
+    nl: {
+      label: 'Vochtig houden — royaal water',
+      text: 'Kruiden hebben dorst — geef royaal water zodra de bovenkant droog wordt, tot het onderuit de pot loopt. Houd de aarde gelijkmatig vochtig, maar giet water dat in de schotel blijft staan weg.',
+    },
+  },
+  flowering: {
+    en: {
+      label: 'Soak the soil, drain, let the top dry',
+      text: 'Water thoroughly until it drains from the bottom, aiming at the soil rather than the flowers or leaves. Let the top of the soil dry before the next drink and empty the saucer so the roots never sit in water.',
+    },
+    nl: {
+      label: 'Aarde doordrenken, laten uitlekken',
+      text: 'Water grondig tot het onderuit de pot loopt en richt op de aarde in plaats van op de bloemen of bladeren. Laat de bovenkant van de aarde uitdrogen voor de volgende beurt en giet de schotel leeg zodat de wortels nooit in water staan.',
+    },
+  },
+  'tropical-foliage': {
+    en: {
+      label: 'Soak until it drains, then part-dry',
+      text: 'Water thoroughly until it drains from the bottom, then let the top 2–3 cm dry before watering again. Empty the saucer so the roots never sit in water — a soak-then-dry beats frequent small splashes.',
+    },
+    nl: {
+      label: 'Doordrenken, dan deels laten opdrogen',
+      text: 'Water grondig tot het onderuit de pot loopt en laat daarna de bovenste 2–3 cm uitdrogen voor je opnieuw water geeft. Giet de schotel leeg zodat de wortels nooit in water staan — flink water en dan laten opdrogen werkt beter dan vaak kleine scheutjes.',
+    },
+  },
+  other: {
+    en: {
+      label: 'Soak until it drains, then let the top dry',
+      text: 'Water thoroughly until it just drains from the bottom, then let the top of the soil dry before the next drink. Tip out any water left standing in the saucer — sitting in water is the most common cause of root rot.',
+    },
+    nl: {
+      label: 'Doordrenken, dan bovenkant laten opdrogen',
+      text: 'Water grondig tot het net onderuit de pot loopt en laat daarna de bovenkant van de aarde uitdrogen voor de volgende beurt. Giet water dat in de schotel blijft staan weg — in water staan is de meest voorkomende oorzaak van wortelrot.',
+    },
+  },
+};
+
+export function wateringAmount(plant) {
+  const cat = plantCategory(plant);
+  const byLang = WATER_AMOUNT[cat] || WATER_AMOUNT.other;
+  return byLang[getLang() === 'nl' ? 'nl' : 'en'];
 }
 
 // Flag a manually-entered schedule that's well outside the species' known-good
