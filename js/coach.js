@@ -236,10 +236,30 @@ const WATER_AMOUNT = {
   },
 };
 
+// A pot with no drainage hole is the one case where the normal advice is not
+// just imprecise but wrong: you can't "water until it drains" or "empty the
+// saucer" when water has nowhere to go — it pools at the bottom and rots the
+// roots. So when the plant is known to be in a no-drainage pot, this guidance
+// overrides the type-based text with a safe measured-amount routine.
+const WATER_NO_DRAINAGE = {
+  en: {
+    label: 'No drainage — add a little at a time, never let it pool',
+    text: 'This pot has no drainage hole, so excess water can\'t escape — too much collects at the bottom and rots the roots. Add just a little at a time (roughly a third of the pot at most), let it soak in before adding more, and never leave water standing at the base. Tip the pot to the side to check, and move it to a pot with drainage when you can.',
+  },
+  nl: {
+    label: 'Geen gaatje — beetje bij beetje, nooit laten staan',
+    text: 'Deze pot heeft geen gat, dus overtollig water kan er niet uit — te veel blijft onderin staan en laat de wortels rotten. Geef steeds maar een beetje (hooguit ongeveer een derde van de pot), laat het intrekken voor je meer geeft en laat nooit water onderin staan. Kantel de pot om te checken, en zet \'m in een pot met een gat zodra dat kan.',
+  },
+};
+
 export function wateringAmount(plant) {
+  const nl = getLang() === 'nl';
+  if (plant && plant.conditions && plant.conditions.drainage === 'no') {
+    return WATER_NO_DRAINAGE[nl ? 'nl' : 'en'];
+  }
   const cat = plantCategory(plant);
   const byLang = WATER_AMOUNT[cat] || WATER_AMOUNT.other;
-  return byLang[getLang() === 'nl' ? 'nl' : 'en'];
+  return byLang[nl ? 'nl' : 'en'];
 }
 
 // Flag a manually-entered schedule that's well outside the species' known-good
