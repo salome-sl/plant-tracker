@@ -347,15 +347,67 @@ const REPOT_SEASON = {
   winter: { en: 'Avoid repotting mid-winter — wait for spring unless it\'s urgent.', nl: 'Verpot niet midden in de winter — wacht op de lente, tenzij het dringend is.' },
 };
 
-export function pruningRepotTips(plant, settings, now = new Date()) {
-  const lang = getLang() === 'nl' ? 'nl' : 'en';
+// Roughly how often each type wants repotting — used to decide when a logged
+// repot is old enough that it's worth checking for root-bound signs. Deliberately
+// on the patient side so it prompts a *check*, never nags.
+const REPOT_DUE_YEARS = { succulent: 3, herb: 1, orchid: 2, fern: 2, flowering: 2, 'tropical-foliage': 2, other: 2 };
+
+// A friendly "how long ago" duration (no "ago"/"geleden" — the caller adds that).
+function elapsedDuration(from, to, nl) {
+  const days = Math.max(0, Math.floor((to - from) / 86400000));
+  if (days < 10) return nl ? 'een paar dagen' : 'a few days';
+  if (days < 25) return nl ? 'een paar weken' : 'a couple of weeks';
+  const months = Math.round(days / 30.44);
+  if (months < 12) return nl ? `ongeveer ${months} ${months === 1 ? 'maand' : 'maanden'}` : `about ${months} month${months === 1 ? '' : 's'}`;
+  const years = Math.floor(days / 365.25);
+  const rem = Math.round((days - years * 365.25) / 30.44);
+  if (rem >= 11) return nl ? `bijna ${years + 1} jaar` : `almost ${years + 1} years`;
+  if (rem <= 4) return nl ? `ongeveer ${years} jaar` : `about ${years} year${years > 1 ? 's' : ''}`;
+  return nl ? `ruim ${years} jaar` : `over ${years} year${years > 1 ? 's' : ''}`;
+}
+
+// Pruning & repotting guidance. opts.lastPrune / opts.lastRepot (Date | null)
+// make the text time-aware: repotting turns into a "check for root-bound signs"
+// prompt once it's been longer than the type's usual interval.
+export function pruningRepotTips(plant, settings, now = new Date(), opts = {}) {
+  const nl = getLang() === 'nl';
+  const lang = nl ? 'nl' : 'en';
   const cat = plantCategory(plant);
   const season = seasonForDate(now, settings.hemisphere);
-  const prune = (PRUNE_BY_CAT[cat] || PRUNE_BY_CAT.other)[lang];
-  const repot = (REPOT_BY_CAT[cat] || REPOT_BY_CAT.other)[lang];
+  const { lastPrune = null, lastRepot = null } = opts;
+
+  const pruneTech = (PRUNE_BY_CAT[cat] || PRUNE_BY_CAT.other)[lang];
+  let pruneText;
+  if (lastPrune) {
+    const dur = elapsedDuration(lastPrune, now, nl);
+    pruneText = nl
+      ? `Je hebt 'm ${dur} geleden gesnoeid. ${pruneTech} ${PRUNE_SEASON[season].nl}`
+      : `You last pruned it ${dur} ago. ${pruneTech} ${PRUNE_SEASON[season].en}`;
+  } else {
+    pruneText = `${pruneTech} ${PRUNE_SEASON[season][lang]}`;
+  }
+
+  const repotTech = (REPOT_BY_CAT[cat] || REPOT_BY_CAT.other)[lang];
+  let repotText;
+  if (lastRepot) {
+    const dur = elapsedDuration(lastRepot, now, nl);
+    const overdue = (now - lastRepot) / 86400000 / 365.25 >= (REPOT_DUE_YEARS[cat] ?? 2);
+    if (overdue) {
+      repotText = nl
+        ? `Het is ${dur} geleden dat je 'm hebt verpot — een goed moment om te checken of de wortels rondcirkelen of onderuit de gaatjes groeien. Zo ja, ga één maat groter in verse aarde. ${REPOT_SEASON[season].nl}`
+        : `It's been ${dur} since the last repot — worth checking now whether the roots are circling or growing out the drainage holes. If so, pot up just one size in fresh soil. ${REPOT_SEASON[season].en}`;
+    } else {
+      repotText = nl
+        ? `Je hebt 'm ${dur} geleden verpot, dus hij zit voorlopig goed — let alleen op wortels die gaan cirkelen of onderuit komen.`
+        : `You repotted it ${dur} ago, so it's settled in for now — just keep an eye out for roots circling or coming out the bottom.`;
+    }
+  } else {
+    repotText = `${repotTech} ${REPOT_SEASON[season][lang]}`;
+  }
+
   return [
-    { icon: '✂️', text: `${prune} ${PRUNE_SEASON[season][lang]}` },
-    { icon: '🪴', text: `${repot} ${REPOT_SEASON[season][lang]}` },
+    { icon: '✂️', kind: 'prune', text: pruneText },
+    { icon: '🪴', kind: 'repot', text: repotText },
   ];
 }
 

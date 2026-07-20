@@ -6,7 +6,7 @@ import * as db from './db.js';
 import { SPECIES, LIGHT, getSpecies, profileFromSpecies, DEFAULT_PROFILE, allSpecies, isCustomSpecies, registerCustomSpecies } from './species.js';
 import { SYMPTOMS, getSymptom, tailorCauses, CATEGORY_LEAD, CATEGORY_NOUN } from './diagnostics.js';
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
-import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, plantCategory, MS_PER_DAY } from './schedule.js';
+import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, plantCategory, lastEvent, MS_PER_DAY } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings, wateringAmount, pruningRepotTips } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
@@ -710,15 +710,43 @@ route(/^\/plant\/(.+)$/, async (id) => {
     ]),
   ]));
 
-  // Pruning & repotting — seasonal, plant-type guidance for "when the time comes".
-  const prTips = pruningRepotTips(plant, settings, now);
+  // Pruning & repotting — seasonal, plant-type guidance for "when the time comes",
+  // made time-aware by the last logged prune/repot, with a one-tap log on each.
+  const lastPruneEv = lastEvent(events, id, 'prune');
+  const lastRepotEv = lastEvent(events, id, 'repot');
+  const prTips = pruningRepotTips(plant, settings, now, {
+    lastPrune: lastPruneEv ? new Date(lastPruneEv.date) : null,
+    lastRepot: lastRepotEv ? new Date(lastRepotEv.date) : null,
+  });
+  const nlLang = getLang() === 'nl';
+  const lastEvByKind = { prune: lastPruneEv, repot: lastRepotEv };
+  const kindLabel = {
+    prune: nlLang ? 'Laatst gesnoeid' : 'Last pruned',
+    repot: nlLang ? 'Laatst verpot' : 'Last repotted',
+  };
   view.append(el('h2', { class: 'section-title' }, 'Pruning & repotting'));
   view.append(el('div', { class: 'coach-card' }, [
     el('div', { class: 'coach-avatar' }, '✂️'),
     el('div', { class: 'coach-body' }, [
-      el('ul', { class: 'coach-tips' }, prTips.map((t) =>
-        el('li', {}, [el('span', { class: 'coach-tip-icon' }, t.icon), el('span', {}, t.text)]),
-      )),
+      el('ul', { class: 'coach-tips' }, prTips.map((t) => {
+        const last = lastEvByKind[t.kind];
+        const lastText = last
+          ? `${kindLabel[t.kind]}: ${fmtDate(last.date)}`
+          : `${kindLabel[t.kind]}: ${nlLang ? 'nog niet gelogd' : 'not logged yet'}`;
+        return el('li', {}, [
+          el('span', { class: 'coach-tip-icon' }, t.icon),
+          el('div', { class: 'pr-tip-body' }, [
+            el('div', {}, t.text),
+            el('div', { class: 'pr-last' }, [
+              el('span', {}, lastText),
+              el('button', {
+                class: 'pr-log-btn',
+                onClick: () => openMoreDialog(plant, t.kind),
+              }, nlLang ? 'Loggen' : 'Log'),
+            ]),
+          ]),
+        ]);
+      })),
     ]),
   ]));
 
@@ -1024,16 +1052,17 @@ function openPhotoDialog(plant) {
   ]);
 }
 
-function openMoreDialog(plant) {
-  const dateInput = el('input', { type: 'date', value: todayISO(), class: 'field' });
+function openMoreDialog(plant, presetType) {
+  const dateInput = el('input', { type: 'date', value: todayISO(), max: todayISO(), class: 'field' });
   const notes = el('input', { class: 'field', placeholder: 'Optional note' });
-  let type = 'repot';
+  let type = presetType || 'repot';
   const sel = el('select', { class: 'field', onChange: (e) => (type = e.target.value) }, [
     el('option', { value: 'repot' }, 'Repotted'),
     el('option', { value: 'prune' }, 'Pruned'),
     el('option', { value: 'mist' }, 'Misted'),
     el('option', { value: 'note' }, 'General note'),
   ]);
+  sel.value = type;
   const m = modal([
     el('h3', { class: 'modal-title' }, 'Log activity'),
     labeled('Activity', sel),
