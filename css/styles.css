@@ -137,6 +137,7 @@ h1, h2, h3, p { margin: 0; }
 .task-main { flex: 1; min-width: 0; }
 .task-name { font-weight: 650; font-size: 15px; }
 .task-sub { font-size: 13px; color: var(--text-dim); }
+.task-amount { font-size: 12px; color: var(--text-dim); margin-top: 2px; opacity: 0.85; }
 .when-poor { color: var(--red); font-weight: 650; }
 .when-watch { color: var(--amber); font-weight: 650; }
 .when-good { color: var(--green); }

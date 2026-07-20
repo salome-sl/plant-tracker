@@ -320,6 +320,10 @@ function taskRow(task, now, onDone, upcoming = false) {
     el('div', { class: 'task-main' }, [
       el('div', { class: 'task-name' }, task.plant.name),
       el('div', { class: 'task-sub' }, [`${icon} ${verb} · `, el('span', { class: `when when-${cls}` }, when)]),
+      // Show how much at a glance, so people don't have to open the plant to
+      // learn whether it wants a splash or a full soak (overwatering is the #1
+      // killer). Only for watering — feeding amount is set once in Settings.
+      isWater ? el('div', { class: 'task-amount' }, `💧 ${wateringAmount(task.plant).label}`) : null,
     ]),
   ]);
   if (!upcoming) {
