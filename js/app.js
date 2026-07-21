@@ -14,6 +14,25 @@ import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from '
 
 const app = document.getElementById('app');
 
+// TEMP (remove after testing): `?forceDate=YYYY-MM-DD` makes the whole app treat
+// that day as "today", so the out-of-season spring pruning/repotting nudges can
+// be previewed on demand. Opt-in via the query string, so normal users are never
+// affected. Use e.g. ?forceDate=2029-04-15 to also age plants into "due".
+(function () {
+  try {
+    const forced = new URLSearchParams(location.search).get('forceDate');
+    if (!forced) return;
+    const ms = new Date(`${forced}T12:00:00`).getTime();
+    if (Number.isNaN(ms)) return;
+    const RealDate = Date;
+    globalThis.Date = class extends RealDate {
+      constructor(...a) { if (a.length === 0) super(ms); else super(...a); }
+      static now() { return ms; }
+    };
+    console.warn('[plant-tracker] forceDate active — treating today as', forced);
+  } catch { /* ignore */ }
+})();
+
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
 const APP_VERSION = '1.3.30';
