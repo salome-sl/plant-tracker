@@ -10,6 +10,7 @@ import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterva
 import { getSettings, saveSettings } from './settings.js';
 import { welcomeMessage, careTips, scheduleWarnings, wateringAmount, pruningRepotTips, seasonalNudges } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
+import { unitSwitchMessage } from './quips.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
 const app = document.getElementById('app');
@@ -62,7 +63,7 @@ function showUpdatePrompt(waitingWorker) {
 // ---- Toast --------------------------------------------------------------
 
 let toastTimer;
-function toast(msg, actionLabel, action) {
+function toast(msg, actionLabel, action, duration) {
   let t = document.getElementById('toast');
   if (!t) {
     t = el('div', { id: 'toast', class: 'toast' });
@@ -76,7 +77,7 @@ function toast(msg, actionLabel, action) {
   localizeDOM(t); // toasts are created outside the render pass — translate them here
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, actionLabel ? 6000 : 3000);
+  toastTimer = setTimeout(hideToast, duration || (actionLabel ? 6000 : 3000));
 }
 function hideToast() {
   const t = document.getElementById('toast');
@@ -2248,7 +2249,13 @@ route(/^\/settings$/, async () => {
   ]);
   langSel.value = settings.lang || 'en';
   const unitsSel = el('select', { class: 'field', onChange: (e) => {
-    saveSettings({ units: e.target.value }); toast('Saved'); render();
+    const prev = settings.units || 'metric';
+    const next = e.target.value;
+    saveSettings({ units: next });
+    // A metric↔imperial switch gets a playful quip; give it time to be read.
+    if (next !== prev) toast(unitSwitchMessage(next), null, null, 5200);
+    else toast('Saved');
+    render();
   } }, [
     el('option', { value: 'metric' }, 'Metric (cm, °C)'),
     el('option', { value: 'imperial' }, 'Imperial (in, °F)'),

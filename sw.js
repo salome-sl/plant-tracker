@@ -19,6 +19,7 @@ const ASSETS = [
   './js/settings.js',
   './js/util.js',
   './js/coach.js',
+  './js/quips.js',
   './js/ai.js',
   './js/handoff.js',
   './js/i18n.js',
