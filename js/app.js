@@ -16,7 +16,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.31';
+const APP_VERSION = '1.3.32';
 
 // ---- Install (PWA) ------------------------------------------------------
 
