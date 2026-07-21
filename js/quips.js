@@ -36,6 +36,7 @@ const TO_IMPERIAL = {
     "Welcome to the dark side — mind the edge, it's a long way down.",
     "Cool, cool. Just don't ask how many ounces are in a gallon.",
     'The dark side welcomes you. Your microwave clock does not.',
+    'I guess just moving the decimal point over was too much to ask.',
   ],
   nl: [
     'Imperial? Gedurfd. De rest van de wereld wacht wel even.',
@@ -63,6 +64,7 @@ const TO_IMPERIAL = {
     'Welkom aan de duistere kant — pas op voor de rand, het is een flinke val.',
     'Prima hoor. Vraag alleen niet hoeveel ons er in een gallon gaan.',
     'De duistere kant verwelkomt je. Je magnetronklok niet.',
+    'Ik neem aan dat even de komma verschuiven te veel gevraagd was.',
   ],
 };
 
