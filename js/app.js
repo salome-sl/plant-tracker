@@ -17,7 +17,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.38';
+const APP_VERSION = '1.3.39';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -1041,6 +1041,25 @@ function modal(contentNodes, { onClose } = {}) {
   localizeDOM(overlay); // dialogs live outside #app — translate them too
   function close() { overlay.remove(); if (onClose) onClose(); }
   return { close, overlay };
+}
+
+// A full-screen pop-up that stays until the user taps anywhere to dismiss it.
+// Used for the playful unit-switch message so it can actually be read. The
+// message is already in the right language; data-noloc keeps the DOM pass off it.
+function showTapPopup(message) {
+  const hint = getLang() === 'nl' ? 'Tik ergens om verder te gaan' : 'Tap anywhere to continue';
+  const overlay = el('div', { class: 'tap-popup-overlay', 'data-noloc': '' }, [
+    el('div', { class: 'tap-popup' }, [
+      el('div', { class: 'tap-popup-msg' }, message),
+      el('div', { class: 'tap-popup-hint' }, hint),
+    ]),
+  ]);
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = () => close();
+  overlay.addEventListener('click', close);       // tap anywhere (bubbles from the box)
+  document.addEventListener('keydown', onKey);     // or any key, on desktop
+  document.body.append(overlay);
+  return { close };
 }
 
 function openImage(src, caption) {
@@ -2276,10 +2295,11 @@ route(/^\/settings$/, async () => {
     const prev = settings.units || 'metric';
     const next = e.target.value;
     saveSettings({ units: next });
-    // A metric↔imperial switch gets a playful quip; give it time to be read.
-    if (next !== prev) toast(unitSwitchMessage(next), null, null, 5200);
-    else toast('Saved');
     render();
+    // A metric↔imperial switch gets a playful quip in a tap-to-dismiss pop-up so
+    // it can actually be read; a no-op re-select just confirms quietly.
+    if (next !== prev) showTapPopup(unitSwitchMessage(next));
+    else toast('Saved');
   } }, [
     el('option', { value: 'metric' }, 'Metric (cm, °C)'),
     el('option', { value: 'imperial' }, 'Imperial (in, °F)'),

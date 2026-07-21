@@ -432,6 +432,14 @@ label.btn.full { display: block; width: 100%; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: flex-end; justify-content: center; padding: 0; animation: fade 0.15s; }
 .modal { background: var(--surface); width: 100%; max-width: var(--max); border-radius: 20px 20px 0 0; padding: 20px 18px calc(20px + env(safe-area-inset-bottom, 0px)); max-height: 90vh; overflow-y: auto; animation: slideup 0.22s ease; }
 @keyframes slideup { from { transform: translateY(30px); } to { transform: none; } }
+
+/* Tap-anywhere pop-up (unit-switch quip) */
+.tap-popup-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 300; display: grid; place-items: center; padding: 24px; cursor: pointer; animation: fade 0.15s; }
+.tap-popup { background: var(--surface); color: var(--text); border-radius: var(--radius); box-shadow: var(--shadow); padding: 30px 26px; max-width: 380px; text-align: center; animation: popin 0.2s ease; }
+@keyframes popin { from { transform: scale(0.92); opacity: 0; } to { transform: none; opacity: 1; } }
+.tap-popup-msg { font-size: 18px; font-weight: 650; line-height: 1.4; }
+.tap-popup-hint { margin-top: 20px; font-size: 13px; color: var(--text-dim); letter-spacing: 0.02em; animation: hintpulse 1.6s ease-in-out infinite; }
+@keyframes hintpulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 14px; }
 .modal-text { color: var(--text-dim); font-size: 14px; line-height: 1.5; margin-bottom: 16px; }
 .modal-actions { display: flex; gap: 10px; margin-top: 8px; }
