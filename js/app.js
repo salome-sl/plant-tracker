@@ -17,7 +17,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.37';
+const APP_VERSION = '1.3.38';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -803,7 +803,7 @@ route(/^\/plant\/(.+)$/, async (id) => {
     careItem('🌱', 'Feed', pr.fertilize ? `Every ${pr.fertilize} days in season` : 'Rarely'),
     careItem('🪴', 'Soil', pr.soil),
     careItem('🐾', 'Toxicity', pr.toxic),
-    careItem('📈', 'Difficulty', cap(pr.difficulty)),
+    careItem('📈', 'Difficulty', difficultyLabel(pr.difficulty)),
   ]));
   if (pr.tips) {
     view.append(el('div', { class: 'tips-box' }, ['💡 ', pr.tips]));
@@ -1018,6 +1018,16 @@ function timelineRow(e, plant, onChange) {
 }
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+// Localized difficulty label. The bare value ('easy'/'moderate'/'hard') is shown
+// on its own in a few spots where the DOM dictionary can't reach it, so translate
+// it at the source.
+function difficultyLabel(d) {
+  const nl = getLang() === 'nl'
+    ? { easy: 'Makkelijk', moderate: 'Gemiddeld', hard: 'Lastig' }
+    : null;
+  return (nl && nl[d]) || cap(d);
+}
 
 // =========================================================================
 // DIALOGS (health, photo, more, image viewer, confirm)
@@ -1800,7 +1810,9 @@ function plantForm(existing) {
     const eff = effectiveWaterInterval(p, now, settings.hemisphere, currentConditions());
     const season = seasonForDate(now, settings.hemisphere);
     clear(preview);
-    preview.append(`${SEASON_META[season].emoji} Right now this waters about every ${eff} day${eff === 1 ? '' : 's'}.`);
+    preview.append(getLang() === 'nl'
+      ? `${SEASON_META[season].emoji} Op dit moment geef je hier ongeveer elke ${eff} dag${eff === 1 ? '' : 'en'} water.`
+      : `${SEASON_META[season].emoji} Right now this waters about every ${eff} day${eff === 1 ? '' : 's'}.`);
   }
   [waterInput, winterSel, potSizeSel, potMaterialSel, drainageSel, lightSpotSel].forEach((i) => i.addEventListener('input', refreshPreview));
   form.append(el('div', { class: 'cond-section' }, [
@@ -1987,7 +1999,7 @@ route(/^\/guide$/, () => {
           el('div', { class: 'guide-name' }, s.name),
           el('div', { class: 'guide-latin' }, s.latin),
         ]),
-        isCustomSpecies(s.id) ? el('span', { class: 'diff saved-tag' }, 'Saved') : el('span', { class: `diff diff-${s.difficulty}` }, cap(s.difficulty)),
+        isCustomSpecies(s.id) ? el('span', { class: 'diff saved-tag' }, 'Saved') : el('span', { class: `diff diff-${s.difficulty}` }, difficultyLabel(s.difficulty)),
       ]));
     });
     if (!list.children.length) list.append(el('div', { class: 'muted-box' }, 'No matches.'));

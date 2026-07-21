@@ -136,8 +136,9 @@ export function careTips(plant, settings, now = new Date()) {
   }
 
   if (p.humidity && /high/i.test(p.humidity)) {
+    const humNL = /very high/i.test(p.humidity) ? 'een zeer hoge' : 'een hoge';
     tips.push({ icon: '💦', text: nl
-      ? `Hij houdt van ${tl(p.humidity).toLowerCase()} luchtvochtigheid — zet 'm bij andere planten of gebruik een schaal met kiezels, vooral als de verwarming aan is.`
+      ? `Hij houdt van ${humNL} luchtvochtigheid — zet 'm bij andere planten of gebruik een schaal met kiezels, vooral als de verwarming aan is.`
       : `It likes ${p.humidity.toLowerCase()} humidity — group it with other plants or use a pebble tray, especially with heating on.` });
   }
 
