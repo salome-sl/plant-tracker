@@ -355,7 +355,7 @@ function taskRow(task, now, onDone, upcoming = false) {
   const verb = isWater ? 'Water' : 'Feed';
   const cls = STATE_CLASS[task.state] || 'muted';
   const when = task.daysUntil < 0
-    ? `${-task.daysUntil}d overdue`
+    ? `${-task.daysUntil} days overdue`
     : task.daysUntil === 0 ? 'due today' : fmtRelative(task.daysUntil);
 
   const row = el('div', { class: `task-row task-${cls}`, onClick: () => navigate(`/plant/${task.plant.id}`) }, [
@@ -417,8 +417,7 @@ route(/^\/plants$/, async () => {
   for (const p of plants) {
     const st = overallStatus(p, events, now, settings.hemisphere);
     const w = st.water;
-    const waterWhen = w.daysUntil < 0 ? `Water ${-w.daysUntil}d overdue`
-      : w.daysUntil === 0 ? 'Water today' : `Water ${fmtRelative(w.daysUntil)}`;
+    const waterWhen = scheduleWhenText(w.daysUntil);
     grid.append(el('div', { class: 'plant-card', onClick: () => navigate(`/plant/${p.id}`) }, [
       el('div', { class: 'plant-card-photo' }, [plantThumb(p, 0)]),
       el('div', { class: 'plant-card-body' }, [
@@ -881,13 +880,26 @@ route(/^\/plant\/(.+)$/, async (id) => {
   app.append(view);
 });
 
+// Compact "when is it due" label, shared by the plant grid and schedule cards.
+// Leans on the surrounding icon for context, so it's just the timing — no verb,
+// which keeps the Dutch natural ("Over 3 dagen" rather than "Water over 3 dagen").
+// Returns the final localized string directly (not via the DOM pass), because the
+// grid concatenates it with an emoji into one text node that localizeDOM can't match.
+function scheduleWhenText(daysUntil, paused = false) {
+  const nl = getLang() === 'nl';
+  if (paused) return nl ? 'Dit seizoen gepauzeerd' : 'Paused this season';
+  if (daysUntil < 0) {
+    const n = -daysUntil;
+    return nl ? `${n} dag${n === 1 ? '' : 'en'} te laat` : `${n} days overdue`;
+  }
+  if (daysUntil === 0) return nl ? 'Vandaag aan de beurt' : 'Due today';
+  const rel = fmtRelative(daysUntil);
+  return nl ? rel.charAt(0).toUpperCase() + rel.slice(1) : `Due ${rel}`;
+}
+
 function scheduleCard({ icon, title, every, last, due, daysUntil, state, paused, onDo, onDoDated, doLabel, foot }) {
   const cls = STATE_CLASS[state] || 'muted';
-  const rel = fmtRelative(daysUntil);
-  const whenText = paused ? 'Paused this season'
-    : daysUntil < 0 ? `${-daysUntil} days overdue`
-    : daysUntil === 0 ? 'Due today'
-    : getLang() === 'nl' ? rel.charAt(0).toUpperCase() + rel.slice(1) : `Due ${rel}`;
+  const whenText = scheduleWhenText(daysUntil, paused);
   return el('div', { class: `sched-card sched-${cls}` }, [
     el('div', { class: 'sched-head' }, [
       el('span', { class: 'sched-icon' }, icon),

@@ -103,7 +103,7 @@ export function careTips(plant, settings, now = new Date()) {
   tips.push({
     icon: '💧',
     text: nl
-      ? `Geef dit seizoen ongeveer elke ${interval} dag${interval === 1 ? '' : 'en'} water — laat de aarde tussen twee beurten tot de juiste diepte uitdrogen in plaats van op een strak schema te gieten.`
+      ? `Geef dit seizoen ongeveer elke ${interval} dag${interval === 1 ? '' : 'en'} water — laat de aarde tot de juiste diepte uitdrogen voordat je opnieuw water geeft, in plaats van op een strak schema te gieten.`
       : `Water roughly every ${interval} day${interval === 1 ? '' : 's'} this season — let the soil dry to the right depth between drinks rather than watering on a strict clock.`,
   });
 
@@ -211,7 +211,7 @@ const WATER_AMOUNT = {
     },
     nl: {
       label: 'Aarde doordrenken, laten uitlekken',
-      text: 'Water grondig tot het onderuit de pot loopt en richt op de aarde in plaats van op de bloemen of bladeren. Laat de bovenkant van de aarde uitdrogen voor de volgende beurt en giet de schotel leeg zodat de wortels nooit in water staan.',
+      text: 'Water grondig tot het onderuit de pot loopt en richt op de aarde in plaats van op de bloemen of bladeren. Laat de bovenkant van de aarde uitdrogen voordat je opnieuw water geeft en giet de schotel leeg zodat de wortels nooit in water staan.',
     },
   },
   'tropical-foliage': {
@@ -231,7 +231,7 @@ const WATER_AMOUNT = {
     },
     nl: {
       label: 'Doordrenken, dan bovenkant laten opdrogen',
-      text: 'Water grondig tot het net onderuit de pot loopt en laat daarna de bovenkant van de aarde uitdrogen voor de volgende beurt. Giet water dat in de schotel blijft staan weg — in water staan is de meest voorkomende oorzaak van wortelrot.',
+      text: 'Water grondig tot het net onderuit de pot loopt en laat daarna de bovenkant van de aarde uitdrogen voordat je opnieuw water geeft. Giet water dat in de schotel blijft staan weg — in water staan is de meest voorkomende oorzaak van wortelrot.',
     },
   },
 };
