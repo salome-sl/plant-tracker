@@ -411,6 +411,61 @@ export function pruningRepotTips(plant, settings, now = new Date(), opts = {}) {
   ];
 }
 
+// Types that benefit from an annual spring shape-prune. Succulents, ferns and
+// orchids are deliberately excluded — they're "remove dead growth only", so a
+// "time to prune" nudge would be wrong advice for them.
+const SPRING_PRUNE_CATS = new Set(['tropical-foliage', 'flowering', 'other']);
+
+function repotIsDue(plant, now, lastRepot, cat) {
+  const years = REPOT_DUE_YEARS[cat] ?? 2;
+  // Fall back to how long we've known the plant when no repot was ever logged.
+  const ref = lastRepot || (plant.acquiredDate ? new Date(plant.acquiredDate)
+    : (plant.createdAt ? new Date(plant.createdAt) : null));
+  if (!ref || isNaN(ref)) return false;
+  return (now - ref) / 86400000 / 365.25 >= years;
+}
+
+function pruneIsDue(cat, now, lastPrune, plantAgeDays) {
+  if (!SPRING_PRUNE_CATS.has(cat)) return false;
+  if (lastPrune) return (now - lastPrune) / 86400000 >= 120; // not shaped in ~4 months
+  return plantAgeDays >= 120;                                // never pruned, but established enough to
+}
+
+// Seasonal nudges — the "when the time gets there" trigger. Only fires in spring
+// (the right window for both jobs) and only when the plant is actually due, so it
+// prompts at most once a year per plant per job. Each nudge's body ends with a
+// call to open the plant for the full how-to. Returns [] most of the year.
+export function seasonalNudges(plant, settings, now = new Date(), opts = {}) {
+  if (seasonForDate(now, settings.hemisphere) !== 'spring') return [];
+  const nl = getLang() === 'nl';
+  const cat = plantCategory(plant);
+  const name = plant.name || (nl ? 'je plant' : 'your plant');
+  const { lastPrune = null, lastRepot = null } = opts;
+  const knownFrom = plant.acquiredDate ? new Date(plant.acquiredDate)
+    : (plant.createdAt ? new Date(plant.createdAt) : now);
+  const plantAgeDays = isNaN(knownFrom) ? 9999 : (now - knownFrom) / 86400000;
+  const out = [];
+  if (repotIsDue(plant, now, lastRepot, cat)) {
+    out.push({
+      kind: 'repot',
+      title: nl ? `🪴 ${name} is misschien toe aan verpotten` : `🪴 ${name} may be due to repot`,
+      body: nl
+        ? `Het is lente — een goed moment om te checken of de wortels van ${name} uit de pot groeien. Tik voor uitleg.`
+        : `It's spring — a good time to check whether ${name}'s roots have outgrown its pot. Tap for how.`,
+    });
+  }
+  if (pruneIsDue(cat, now, lastPrune, plantAgeDays)) {
+    out.push({
+      kind: 'prune',
+      title: nl ? `✂️ ${name} kan een lentesnoei gebruiken` : `✂️ ${name} could use a spring prune`,
+      body: nl
+        ? `In de lente snoei je ${name} in vorm en knip je kale groei terug. Tik voor uitleg.`
+        : `Spring is the time to shape ${name} and cut back any leggy growth. Tap for how.`,
+    });
+  }
+  return out;
+}
+
 // Flag a manually-entered schedule that's well outside the species' known-good
 // range — a likely mistake — without ever forcing a change. Only applies when a
 // species is known (custom plants have no reference to compare against).

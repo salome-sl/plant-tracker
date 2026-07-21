@@ -162,10 +162,34 @@ function reminderEN(ann) {
   return { title: '🌿 Plant care', body };
 }
 
+// Seasonal pruning/repotting nudges — copy is pre-rendered by the app, we just
+// gate to once per plant/kind/year and deep-link the tap to the plant's how-to.
+async function runSeasonalNudges(digest, now) {
+  const seasonal = Array.isArray(digest.seasonal) ? digest.seasonal : [];
+  if (!seasonal.length) return;
+  const yr = now.getFullYear();
+  const slog = (await idbGetMeta('seasonalNudgeLog')) || {};
+  for (const n of seasonal) {
+    const key = `${n.plantId}|${n.kind}|${yr}`;
+    if (slog[key]) continue;
+    slog[key] = true;
+    await self.registration.showNotification(n.title, {
+      body: n.body,
+      tag: `plant-seasonal-${n.plantId}-${n.kind}`,
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-192.png',
+      data: { url: n.url },
+    });
+  }
+  await idbPutMeta('seasonalNudgeLog', slog);
+}
+
 async function runDailyReminderCheck() {
   const digest = await idbGetMeta('reminderDigest');
-  if (!digest || !Array.isArray(digest.tasks)) return;
+  if (!digest) return;
   const now = new Date();
+  await runSeasonalNudges(digest, now);
+  if (!Array.isArray(digest.tasks)) return;
   const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
   // Due today or overdue.
   const due = digest.tasks.filter((t) => {
@@ -200,10 +224,18 @@ self.addEventListener('periodicsync', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  // Seasonal nudges carry a deep-link to the plant's how-to; watering reminders
+  // have none and just focus the app (its Today list shows what's due).
+  const url = event.notification.data && event.notification.data.url;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-      for (const c of list) { if ('focus' in c) return c.focus(); }
-      return self.clients.openWindow ? self.clients.openWindow('./index.html') : undefined;
+      for (const c of list) {
+        if ('focus' in c) {
+          if (url) c.postMessage({ type: 'navigate', url });
+          return c.focus();
+        }
+      }
+      return self.clients.openWindow ? self.clients.openWindow('./index.html' + (url || '')) : undefined;
     }),
   );
 });

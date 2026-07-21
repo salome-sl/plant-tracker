@@ -243,6 +243,7 @@ const UI_NL = {
   "Photo": "Foto",
   "More": "Meer",
   "Care coach": "Verzorgingscoach",
+  "Seasonal care": "Seizoenszorg",
   "Pruning & repotting": "Snoeien & verpotten",
   "Care needs": "Verzorging",
   "Light": "Licht",

@@ -8,7 +8,7 @@ import { SYMPTOMS, getSymptom, tailorCauses, CATEGORY_LEAD, CATEGORY_NOUN } from
 import { seasonForDate, SEASON_META, seasonalExplanation } from './season.js';
 import { waterStatus, feedStatus, overallStatus, dueTasks, effectiveWaterInterval, photoStatus, feedCategoryFactor, plantCategory, lastEvent, MS_PER_DAY } from './schedule.js';
 import { getSettings, saveSettings } from './settings.js';
-import { welcomeMessage, careTips, scheduleWarnings, wateringAmount, pruningRepotTips } from './coach.js';
+import { welcomeMessage, careTips, scheduleWarnings, wateringAmount, pruningRepotTips, seasonalNudges } from './coach.js';
 import { buildHandoff, parseHandoffImport, SUMMARY_PROMPT, speciesPrompt, parseSpeciesImport } from './handoff.js';
 import { analyzePlant, lookupSpeciesCare, hasApiKey, AI_MODELS, AIError } from './ai.js';
 
@@ -170,8 +170,30 @@ async function refreshReminderState() {
       .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
     const photoDue = plants.filter((p) => photoStatus(p, events, now).due)
       .map((p) => ({ plantId: p.id, name: p.name, type: 'photo', due: now.toISOString() }));
-    await db.putMeta('reminderDigest', { tasks: tasks.concat(photoDue), generatedAt: now.toISOString(), lang: settings.lang || 'en' });
+    // Seasonal pruning/repotting nudges, pre-rendered in the current language so
+    // the service worker can show them without re-running the seasonal math.
+    const seasonal = gatherSeasonalNudges(plants, events, settings, now);
+    await db.putMeta('reminderDigest', { tasks: tasks.concat(photoDue), seasonal, generatedAt: now.toISOString(), lang: settings.lang || 'en' });
   } catch { /* ignore */ }
+}
+
+// Collect this-spring's pruning/repotting nudges across all plants. Each entry
+// carries the finished notification copy plus a deep-link so a tap lands on the
+// plant's how-to. Empty outside spring / when nothing is due.
+function gatherSeasonalNudges(plants, events, settings, now) {
+  const out = [];
+  for (const p of plants) {
+    const lp = lastEvent(events, p.id, 'prune');
+    const lr = lastEvent(events, p.id, 'repot');
+    const nudges = seasonalNudges(p, settings, now, {
+      lastPrune: lp ? new Date(lp.date) : null,
+      lastRepot: lr ? new Date(lr.date) : null,
+    });
+    for (const n of nudges) {
+      out.push({ plantId: p.id, name: p.name, kind: n.kind, title: n.title, body: n.body, url: `#/plant/${p.id}` });
+    }
+  }
+  return out;
 }
 
 function updateNav(hash) {
@@ -275,6 +297,26 @@ route(/^\/(today)?$/, async () => {
     view.append(el('h2', { class: 'section-title' }, 'Coming up'));
     const list = el('div', { class: 'task-list' });
     upcoming.forEach((t) => list.append(taskRow(t, now, () => render(), true)));
+    view.append(list);
+  }
+
+  // Seasonal care — spring nudges to prune/repot. Tapping opens the plant, where
+  // the Pruning & repotting card has the full how-to.
+  const seasonalList = gatherSeasonalNudges(plants, events, settings, now);
+  if (seasonalList.length) {
+    view.append(el('h2', { class: 'section-title' }, 'Seasonal care'));
+    const list = el('div', { class: 'task-list' });
+    seasonalList.forEach((n) => {
+      const plant = plants.find((p) => p.id === n.plantId);
+      list.append(el('div', { class: 'task-row', onClick: () => navigate(`/plant/${n.plantId}`) }, [
+        plantThumb(plant, 44),
+        el('div', { class: 'task-main' }, [
+          el('div', { class: 'task-name' }, `${n.kind === 'repot' ? '🪴' : '✂️'} ${n.name}`),
+          el('div', { class: 'task-sub' }, n.body),
+        ]),
+        el('span', { class: 'task-chevron' }, '›'),
+      ]));
+    });
     view.append(list);
   }
 
@@ -2486,11 +2528,32 @@ async function sendTestNotification() {
   }
 }
 
+// Seasonal pruning/repotting nudges — fired at most once per plant/kind/year, so
+// they don't repeat daily through the whole of spring. Each deep-links to the
+// plant's how-to. Shared idea with the SW's copy in sw.js.
+async function fireSeasonalNudges(plants, events, settings, now) {
+  const nudges = gatherSeasonalNudges(plants, events, settings, now);
+  if (!nudges.length) return;
+  const yr = now.getFullYear();
+  const slog = (await db.getMeta('seasonalNudgeLog')) || {};
+  for (const n of nudges) {
+    const key = `${n.plantId}|${n.kind}|${yr}`;
+    if (slog[key]) continue;
+    slog[key] = true;
+    await showReminderNotification({ title: n.title, body: n.body }, {
+      tag: `plant-seasonal-${n.plantId}-${n.kind}`,
+      data: { url: n.url },
+    });
+  }
+  await db.putMeta('seasonalNudgeLog', slog);
+}
+
 async function checkReminders() {
   const settings = getSettings();
   if (!settings.notifications || !('Notification' in window) || Notification.permission !== 'granted') return;
   const now = new Date();
   const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
+  await fireSeasonalNudges(plants, events, settings, now);
   const due = dueTasks(plants, events, now, settings.hemisphere, 0)
     .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
   const photoDue = plants.filter((p) => photoStatus(p, events, now).due)
@@ -2519,12 +2582,13 @@ async function checkReminders() {
 // the service-worker registration. So prefer registration.showNotification()
 // everywhere, and fall back to the constructor only where no service worker is
 // available (some older desktop browsers). Matches the icon/badge the SW uses.
-async function showReminderNotification(msg) {
+async function showReminderNotification(msg, extra = {}) {
   const opts = {
     body: msg.body,
-    tag: 'plant-care-daily',
+    tag: extra.tag || 'plant-care-daily',
     icon: './icons/icon-192.png',
     badge: './icons/icon-192.png',
+    ...(extra.data ? { data: extra.data } : {}),
   };
   if ('serviceWorker' in navigator) {
     try {
@@ -2565,6 +2629,13 @@ async function boot() {
     // the new version. (Guarded so the first-ever registration doesn't reload.)
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (swUpdating) window.location.reload();
+    });
+    // A tapped notification asks the (already-open) app to jump to a plant's
+    // how-to. Cold starts arrive via the URL hash instead (openWindow in sw.js).
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      if (e.data && e.data.type === 'navigate' && typeof e.data.url === 'string') {
+        location.hash = e.data.url.replace(/^#/, '');
+      }
     });
     navigator.serviceWorker.register('./sw.js').then((reg) => {
       // A newer version was already waiting (updated while the app was closed).
