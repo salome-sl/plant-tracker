@@ -465,7 +465,7 @@ const UI_NL = {
   "Permission denied": "Toestemming geweigerd",
   "✅ Reminders enabled": "✅ Herinneringen ingeschakeld",
   "Enable reminders": "Herinneringen inschakelen",
-  "Send a test notification": "Stuur een testmelding",
+  "Send a test reminder": "Stuur een testherinnering",
   "Reminders": "Herinneringen",
   "You’ll always get a “what needs care today” summary when you open or return to the app. On an installed Android app, it can also remind you about once a day in the background (Chrome decides the exact timing). iPhone doesn’t allow background reminders without a server, so there it’s open/reopen only.": "Je krijgt altijd een overzicht van “wat vandaag zorg nodig heeft” wanneer je de app opent of terugkeert. Op een geïnstalleerde Android-app kan 'ie je ook ongeveer één keer per dag op de achtergrond herinneren (Chrome bepaalt het exacte tijdstip). iPhone staat geen achtergrondherinneringen zonder server toe, dus daar is het alleen bij openen/heropenen.",
   "AI health checks": "AI-gezondheidschecks",

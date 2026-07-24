@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v51';
+const CACHE = 'plant-tracker-v52';
 
 const ASSETS = [
   './',
@@ -44,10 +44,10 @@ self.addEventListener('install', (event) => {
 self.addEventListener('message', (event) => {
   if (!event.data) return;
   if (event.data.type === 'SKIP_WAITING') self.skipWaiting();
-  // The app's "Test background reminder" button asks us to run the exact same
-  // check Chrome's periodic sync would — proving the digest → notification path
-  // works, independent of Chrome's (unpredictable) background scheduling. We
-  // reply to the page so it can report the outcome to the user.
+  // The app's "Send a test reminder" button asks us to run the exact same check
+  // Chrome's periodic sync would — proving the digest → notification path works,
+  // independent of Chrome's (unpredictable) background scheduling. We reply to
+  // the page so it can report the outcome to the user.
   if (event.data.type === 'RUN_REMINDER_CHECK') {
     event.waitUntil(
       runDailyReminderCheck({ force: !!event.data.force }).then((result) => {
@@ -197,7 +197,7 @@ async function runSeasonalNudges(digest, now) {
   await idbPutMeta('seasonalNudgeLog', slog);
 }
 
-// Returns a small summary so the "Test background reminder" button can tell the
+// Returns a small summary so the "Send a test reminder" button can tell the
 // user what happened: { hasDigest, dueCount, shown, sample }.
 //
 // opts.force (test only): ALWAYS put a notification on screen — a sample one if

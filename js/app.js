@@ -17,7 +17,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.41';
+const APP_VERSION = '1.3.42';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -2319,15 +2319,14 @@ route(/^\/settings$/, async () => {
     if (perm === 'granted') { saveSettings({ notifications: true }); toast('Reminders on'); render(); }
     else toast('Permission denied');
   } }, settings.notifications && Notification.permission === 'granted' ? '✅ Reminders enabled' : 'Enable reminders');
-  const testNotifBtn = el('button', { class: 'btn btn-ghost', onClick: sendTestNotification }, 'Send a test notification');
-  const testBgBtn = el('button', { class: 'btn btn-ghost', onClick: testBackgroundReminder }, 'Test background reminder');
+  const testBtn = el('button', { class: 'btn btn-ghost', onClick: sendTestReminder }, 'Send a test reminder');
   // Live status line — surfaces whether background reminders are actually armed,
   // so a silent "never registered / blocked" state stops being invisible.
   const bgStatus = el('div', { class: 'hint', 'data-noloc': '' }, 'Checking background reminders…');
   backgroundSyncStatus().then((s) => {
     const msg = {
       active: '✅ Background reminders are active — Chrome may wake the app about once a day (it decides the exact timing, and can skip it to save battery).',
-      inactive: '⏳ Background reminders aren’t running yet. Chrome turns them on automatically as you use the app more; until then you’re reminded when you open it. Tap “Test background reminder” to confirm the reminder itself works.',
+      inactive: '⏳ Background reminders aren’t running yet. Chrome turns them on automatically as you use the app more; until then you’re reminded when you open it. Tap “Send a test reminder” to confirm the reminder itself works.',
       blocked: '⚠️ Background reminders are blocked in this browser’s settings, so you’ll only be reminded when you open the app.',
       unsupported: 'ℹ️ This device can’t run background reminders (that needs an installed Android/Chrome app), so you’ll be reminded when you open or return to the app.',
     }[s.code] || '';
@@ -2335,8 +2334,7 @@ route(/^\/settings$/, async () => {
   }).catch(() => { bgStatus.textContent = ''; });
   view.append(settingsGroup('Reminders', [
     notifBtn,
-    testNotifBtn,
-    testBgBtn,
+    testBtn,
     el('div', { class: 'hint' }, 'You’ll always get a “what needs care today” summary when you open or return to the app. On an installed Android app, it can also remind you about once a day in the background (Chrome decides the exact timing). iPhone doesn’t allow background reminders without a server, so there it’s open/reopen only.'),
     bgStatus,
   ]));
@@ -2519,13 +2517,25 @@ async function backgroundSyncStatus() {
   return { code: 'inactive', permission };
 }
 
-// Run the SW's real background check on demand (force=true so it bypasses the
-// once-per-day de-dup and shows even if today's reminder already fired). This
-// exercises the exact digest → notification path Chrome's periodic sync uses,
-// so it isolates "is the pipeline broken?" from "did Chrome bother to run it?".
-async function testBackgroundReminder() {
+// The single "Send a test reminder" button. It runs the SW's REAL background
+// check on demand (force=true: bypass the once-per-day de-dup and always show a
+// notification — a sample if nothing's actually due), so it faithfully tests the
+// exact digest → notification path Chrome's periodic sync uses. That isolates
+// "is the pipeline broken?" from "did Chrome bother to run it?" — and, unlike a
+// page-fired notification, it exercises the mechanism that can actually fail.
+//
+// It also carries the two safety behaviours a bare notification test lacks: it
+// requests OS permission if needed, and — since the test shows regardless of the
+// in-app toggle — warns when daily reminders are switched off, so a working test
+// never masks a switched-off reminder.
+async function sendTestReminder() {
   const nl = getLang() === 'nl';
+  if (!('Notification' in window)) { toast(nl ? 'Meldingen worden hier niet ondersteund' : 'Notifications not supported here'); return; }
+  let perm = Notification.permission;
+  if (perm !== 'granted') perm = await Notification.requestPermission();
+  if (perm !== 'granted') { toast(nl ? 'Toestemming geweigerd' : 'Permission denied'); return; }
   if (!('serviceWorker' in navigator)) { toast(nl ? 'Niet ondersteund op dit apparaat' : 'Not supported on this device'); return; }
+
   // Make sure the SW reads a current digest, not one from a stale earlier visit.
   await refreshReminderState();
   let reg;
@@ -2547,9 +2557,21 @@ async function testBackgroundReminder() {
   const res = await reply;
 
   if (!res) { toast(nl ? 'Geen reactie van de achtergrond-worker' : 'No response from the background worker'); return; }
-  if (res.shown && res.sample) toast(nl ? 'Werkt ✓ — voorbeeld (er staat nu niets echt te doen)' : 'Works ✓ — sample (nothing is actually due now)');
-  else if (res.shown) toast(nl ? 'Achtergrondmelding werkt ✓' : 'Background reminder works ✓');
-  else toast(nl ? 'De melding kon niet worden getoond — controleer of meldingen voor de app aanstaan' : 'Couldn’t show it — check the app’s notifications are allowed in Android settings');
+  if (!res.shown) {
+    toast(nl ? 'De melding kon niet worden getoond — controleer of meldingen voor de app aanstaan in Android' : 'Couldn’t show it — check the app’s notifications are allowed in Android settings');
+    return;
+  }
+  // The test shows regardless of the toggle; if daily reminders are off, the real
+  // ones still won't fire — say so rather than let a working test reassure falsely.
+  if (!getSettings().notifications) {
+    showTapPopup(nl
+      ? 'De test werkt — maar je dagelijkse herinneringen staan UIT. Zet “Herinneringen” aan om ze echt te ontvangen.'
+      : 'The test works — but your daily reminders are OFF. Turn on “Reminders” above to actually receive them.');
+    return;
+  }
+  toast(res.sample
+    ? (nl ? 'Werkt ✓ — voorbeeld (er staat nu niets echt te doen)' : 'Works ✓ — sample (nothing is actually due now)')
+    : (nl ? 'Herinnering werkt ✓' : 'Reminder works ✓'));
 }
 
 // A stable local-date key (YYYY-M-D) used to send each plant/task at most one
@@ -2617,50 +2639,6 @@ function reminderEN(ann) {
   const worst = ann.filter((t) => t.over >= 1).sort((a, b) => b.over - a.over)[0];
   if (worst) body += ` ${worst.name} is ${days(worst.over)} overdue.`;
   return { title: '🌿 Plant care', body };
-}
-
-// Fire a real notification right now, in the current language, so the user can
-// confirm reminders work (and see the Dutch text) without waiting for Chrome's
-// background schedule. Uses the service-worker path when available — the same
-// one the background reminders use — so it's a faithful preview.
-async function sendTestNotification() {
-  const nl = getLang() === 'nl';
-  if (!('Notification' in window)) { toast('Notifications not supported here'); return; }
-  let perm = Notification.permission;
-  if (perm !== 'granted') perm = await Notification.requestPermission();
-  if (perm !== 'granted') { toast('Permission denied'); return; }
-
-  const now = new Date();
-  const [plants, events] = await Promise.all([db.getPlants(), db.getEvents()]);
-  const due = dueTasks(plants, events, now, getSettings().hemisphere, 0)
-    .map((t) => ({ plantId: t.plant.id, name: t.plant.name, type: t.type, due: t.due.toISOString() }));
-  // Preview real due tasks if there are any; otherwise a friendly sample.
-  const sample = due.length
-    ? due
-    : [{ plantId: 'sample', name: nl ? 'Voorbeeldplant' : 'Sample plant', type: 'water', due: new Date(now.getTime() - 2 * 86400000).toISOString() }];
-  const msg = formatReminder(sample, now) || { title: nl ? '🌿 Plantenzorg' : '🌿 Plant care', body: '' };
-
-  // A working test is misleading if daily reminders are switched off — the test
-  // only needs OS permission, but real reminders also need this toggle on. Say so.
-  const ok = () => {
-    if (getSettings().notifications) { toast(nl ? 'Testmelding verstuurd' : 'Test notification sent'); return; }
-    showTapPopup(nl
-      ? 'De test werkt — maar je dagelijkse herinneringen staan UIT. Zet “Herinneringen” aan om ze echt te ontvangen.'
-      : 'The test works — but your daily reminders are OFF. Turn on “Reminders” above to actually receive them.');
-  };
-  try {
-    const reg = navigator.serviceWorker && navigator.serviceWorker.controller
-      ? await navigator.serviceWorker.ready : null;
-    if (reg && reg.showNotification) {
-      await reg.showNotification(msg.title, { body: msg.body, tag: 'plant-care-test', icon: './icons/icon-192.png', badge: './icons/icon-192.png' });
-    } else {
-      new Notification(msg.title, { body: msg.body });
-    }
-    ok();
-  } catch {
-    try { new Notification(msg.title, { body: msg.body }); ok(); }
-    catch { toast(nl ? 'Kon de melding niet tonen' : 'Could not show notification'); }
-  }
 }
 
 // Seasonal pruning/repotting nudges — fired at most once per plant/kind/year, so
