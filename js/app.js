@@ -17,7 +17,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.39';
+const APP_VERSION = '1.3.40';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -2320,10 +2320,25 @@ route(/^\/settings$/, async () => {
     else toast('Permission denied');
   } }, settings.notifications && Notification.permission === 'granted' ? '✅ Reminders enabled' : 'Enable reminders');
   const testNotifBtn = el('button', { class: 'btn btn-ghost', onClick: sendTestNotification }, 'Send a test notification');
+  const testBgBtn = el('button', { class: 'btn btn-ghost', onClick: testBackgroundReminder }, 'Test background reminder');
+  // Live status line — surfaces whether background reminders are actually armed,
+  // so a silent "never registered / blocked" state stops being invisible.
+  const bgStatus = el('div', { class: 'hint', 'data-noloc': '' }, 'Checking background reminders…');
+  backgroundSyncStatus().then((s) => {
+    const msg = {
+      active: '✅ Background reminders are active — Chrome may wake the app about once a day (it decides the exact timing, and can skip it to save battery).',
+      inactive: '⏳ Background reminders aren’t running yet. Chrome turns them on automatically as you use the app more; until then you’re reminded when you open it. Tap “Test background reminder” to confirm the reminder itself works.',
+      blocked: '⚠️ Background reminders are blocked in this browser’s settings, so you’ll only be reminded when you open the app.',
+      unsupported: 'ℹ️ This device can’t run background reminders (that needs an installed Android/Chrome app), so you’ll be reminded when you open or return to the app.',
+    }[s.code] || '';
+    bgStatus.textContent = msg;
+  }).catch(() => { bgStatus.textContent = ''; });
   view.append(settingsGroup('Reminders', [
     notifBtn,
     testNotifBtn,
+    testBgBtn,
     el('div', { class: 'hint' }, 'You’ll always get a “what needs care today” summary when you open or return to the app. On an installed Android app, it can also remind you about once a day in the background (Chrome decides the exact timing). iPhone doesn’t allow background reminders without a server, so there it’s open/reopen only.'),
+    bgStatus,
   ]));
 
   // AI health checks
@@ -2467,13 +2482,75 @@ function applyTheme() {
 // Edge); silently unsupported elsewhere (iOS/Safari/Firefox) — those rely on the
 // on-open check below.
 async function registerPeriodicSync(reg) {
-  if (!('periodicSync' in reg)) return;
+  if (!reg || !('periodicSync' in reg)) return;
   try {
-    const status = await navigator.permissions.query({ name: 'periodic-background-sync' });
-    if (status.state === 'granted') {
-      await reg.periodicSync.register('plant-care-check', { minInterval: 24 * 60 * 60 * 1000 });
+    // There's no prompt for this permission — Chrome auto-grants it from the
+    // site-engagement score. So don't gate on 'granted': attempt registration
+    // unless it's been explicitly denied, and let register() reject harmlessly
+    // if the browser isn't ready to grant it yet. backgroundSyncStatus() below
+    // reports the real outcome to the user.
+    let state = 'prompt';
+    try { state = (await navigator.permissions.query({ name: 'periodic-background-sync' })).state; } catch { /* name unknown here */ }
+    if (state !== 'denied') {
+      try { await reg.periodicSync.register('plant-care-check', { minInterval: 24 * 60 * 60 * 1000 }); }
+      catch { /* browser declined for now — not enough engagement yet */ }
     }
   } catch { /* not supported here */ }
+}
+
+// Live truth about whether background reminders can actually fire, checked at
+// render time (permissions/registration can change between launches):
+//   unsupported — this browser/OS has no Periodic Background Sync (iOS, desktop
+//                 Firefox/Safari, or a non-installed context)
+//   active      — registered; Chrome may wake us ~daily (its call on timing)
+//   inactive    — supported but not registered yet (engagement too low so far)
+//   blocked     — the permission is denied
+async function backgroundSyncStatus() {
+  if (!('serviceWorker' in navigator)) return { code: 'unsupported' };
+  let reg = null;
+  try { reg = await navigator.serviceWorker.ready; } catch { return { code: 'unsupported' }; }
+  if (!reg || !('periodicSync' in reg)) return { code: 'unsupported' };
+  let permission = 'prompt';
+  try { permission = (await navigator.permissions.query({ name: 'periodic-background-sync' })).state; } catch { /* ignore */ }
+  let registered = false;
+  try { registered = (await reg.periodicSync.getTags()).includes('plant-care-check'); } catch { /* ignore */ }
+  if (registered) return { code: 'active', permission };
+  if (permission === 'denied') return { code: 'blocked', permission };
+  return { code: 'inactive', permission };
+}
+
+// Run the SW's real background check on demand (force=true so it bypasses the
+// once-per-day de-dup and shows even if today's reminder already fired). This
+// exercises the exact digest → notification path Chrome's periodic sync uses,
+// so it isolates "is the pipeline broken?" from "did Chrome bother to run it?".
+async function testBackgroundReminder() {
+  const nl = getLang() === 'nl';
+  if (!('serviceWorker' in navigator)) { toast(nl ? 'Niet ondersteund op dit apparaat' : 'Not supported on this device'); return; }
+  // Make sure the SW reads a current digest, not one from a stale earlier visit.
+  await refreshReminderState();
+  let reg;
+  try { reg = await navigator.serviceWorker.ready; } catch { reg = null; }
+  const worker = reg && (reg.active || navigator.serviceWorker.controller);
+  if (!worker) { toast(nl ? 'Service worker nog niet actief — probeer zo nog eens' : 'Service worker not active yet — try again in a moment'); return; }
+
+  const reply = new Promise((resolve) => {
+    const onMsg = (e) => {
+      if (e.data && e.data.type === 'REMINDER_CHECK_RESULT') {
+        navigator.serviceWorker.removeEventListener('message', onMsg);
+        resolve(e.data);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', onMsg);
+    setTimeout(() => { navigator.serviceWorker.removeEventListener('message', onMsg); resolve(null); }, 5000);
+  });
+  worker.postMessage({ type: 'RUN_REMINDER_CHECK', force: true });
+  const res = await reply;
+
+  if (!res) { toast(nl ? 'Geen reactie van de achtergrond-worker' : 'No response from the background worker'); return; }
+  if (res.shown) toast(nl ? 'Achtergrondmelding werkt ✓' : 'Background reminder works ✓');
+  else if (!res.hasDigest) toast(nl ? 'Nog geen zorggegevens — open eerst een plant' : 'No care data yet — open a plant first');
+  else if (res.dueCount === 0) toast(nl ? 'Er staat nu niets te doen' : 'Nothing needs care right now');
+  else toast(nl ? 'De melding kon niet worden getoond' : 'Could not show the notification');
 }
 
 // A stable local-date key (YYYY-M-D) used to send each plant/task at most one
@@ -2564,6 +2641,14 @@ async function sendTestNotification() {
     : [{ plantId: 'sample', name: nl ? 'Voorbeeldplant' : 'Sample plant', type: 'water', due: new Date(now.getTime() - 2 * 86400000).toISOString() }];
   const msg = formatReminder(sample, now) || { title: nl ? '🌿 Plantenzorg' : '🌿 Plant care', body: '' };
 
+  // A working test is misleading if daily reminders are switched off — the test
+  // only needs OS permission, but real reminders also need this toggle on. Say so.
+  const ok = () => {
+    if (getSettings().notifications) { toast(nl ? 'Testmelding verstuurd' : 'Test notification sent'); return; }
+    showTapPopup(nl
+      ? 'De test werkt — maar je dagelijkse herinneringen staan UIT. Zet “Herinneringen” aan om ze echt te ontvangen.'
+      : 'The test works — but your daily reminders are OFF. Turn on “Reminders” above to actually receive them.');
+  };
   try {
     const reg = navigator.serviceWorker && navigator.serviceWorker.controller
       ? await navigator.serviceWorker.ready : null;
@@ -2572,9 +2657,9 @@ async function sendTestNotification() {
     } else {
       new Notification(msg.title, { body: msg.body });
     }
-    toast(nl ? 'Testmelding verstuurd' : 'Test notification sent');
+    ok();
   } catch {
-    try { new Notification(msg.title, { body: msg.body }); toast(nl ? 'Testmelding verstuurd' : 'Test notification sent'); }
+    try { new Notification(msg.title, { body: msg.body }); ok(); }
     catch { toast(nl ? 'Kon de melding niet tonen' : 'Could not show notification'); }
   }
 }

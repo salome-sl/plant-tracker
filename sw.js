@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v49';
+const CACHE = 'plant-tracker-v50';
 
 const ASSETS = [
   './',
@@ -42,7 +42,19 @@ self.addEventListener('install', (event) => {
 
 // The page asks us to activate immediately when the user taps "Update".
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (!event.data) return;
+  if (event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  // The app's "Test background reminder" button asks us to run the exact same
+  // check Chrome's periodic sync would — proving the digest → notification path
+  // works, independent of Chrome's (unpredictable) background scheduling. We
+  // reply to the page so it can report the outcome to the user.
+  if (event.data.type === 'RUN_REMINDER_CHECK') {
+    event.waitUntil(
+      runDailyReminderCheck({ force: !!event.data.force }).then((result) => {
+        if (event.source) event.source.postMessage({ type: 'REMINDER_CHECK_RESULT', ...result });
+      }),
+    );
+  }
 });
 
 self.addEventListener('activate', (event) => {
@@ -185,38 +197,51 @@ async function runSeasonalNudges(digest, now) {
   await idbPutMeta('seasonalNudgeLog', slog);
 }
 
-async function runDailyReminderCheck() {
+// Returns a small summary so the "Test background reminder" button can tell the
+// user what happened: { hasDigest, dueCount, shown }.
+// opts.force (test only): skip the seasonal nudges and the once-per-day de-dup —
+// and don't touch notifyLog — so a test never fires early, consumes the yearly
+// seasonal quota, or suppresses the real reminder later today.
+async function runDailyReminderCheck(opts = {}) {
+  const force = !!opts.force;
   const digest = await idbGetMeta('reminderDigest');
-  if (!digest) return;
+  if (!digest) return { hasDigest: false, dueCount: 0, shown: false };
   const now = new Date();
-  await runSeasonalNudges(digest, now);
-  if (!Array.isArray(digest.tasks)) return;
+  if (!force) await runSeasonalNudges(digest, now);
+  if (!Array.isArray(digest.tasks)) return { hasDigest: true, dueCount: 0, shown: false };
   const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
   // Due today or overdue.
   const due = digest.tasks.filter((t) => {
     const d = new Date(t.due); d.setHours(0, 0, 0, 0);
     return d.getTime() <= startToday.getTime();
   });
-  if (!due.length) { await idbPutMeta('notifyLog', {}); return; }
+  if (!due.length) {
+    if (!force) await idbPutMeta('notifyLog', {});
+    return { hasDigest: true, dueCount: 0, shown: false };
+  }
 
   // Once-per-day de-dup, shared with the in-app notifier so the two never
-  // double-fire for the same plant on the same day.
-  const today = reminderDayKey(now);
-  const log = (await idbGetMeta('notifyLog')) || {};
-  const fresh = due.filter((t) => log[`${t.plantId}|${t.type}`] !== today);
-  const newLog = {};
-  for (const t of due) newLog[`${t.plantId}|${t.type}`] = today;
-  await idbPutMeta('notifyLog', newLog);
-  if (!fresh.length) return;
+  // double-fire for the same plant on the same day. A forced test bypasses it.
+  let fresh = due;
+  if (!force) {
+    const today = reminderDayKey(now);
+    const log = (await idbGetMeta('notifyLog')) || {};
+    fresh = due.filter((t) => log[`${t.plantId}|${t.type}`] !== today);
+    const newLog = {};
+    for (const t of due) newLog[`${t.plantId}|${t.type}`] = today;
+    await idbPutMeta('notifyLog', newLog);
+    if (!fresh.length) return { hasDigest: true, dueCount: due.length, shown: false };
+  }
 
   const msg = formatReminder(fresh, now, digest.lang || 'en');
-  if (!msg) return;
+  if (!msg) return { hasDigest: true, dueCount: due.length, shown: false };
   await self.registration.showNotification(msg.title, {
     body: msg.body,
     tag: 'plant-care-daily',
     icon: './icons/icon-192.png',
     badge: './icons/icon-192.png',
   });
+  return { hasDigest: true, dueCount: due.length, shown: true };
 }
 
 self.addEventListener('periodicsync', (event) => {
