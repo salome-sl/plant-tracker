@@ -17,7 +17,7 @@ const app = document.getElementById('app');
 
 // Bump this (and the CACHE version in sw.js) on every release so users get the
 // update prompt and can see which version they're on in Settings.
-const APP_VERSION = '1.3.40';
+const APP_VERSION = '1.3.41';
 
 // ---- Install (PWA) ------------------------------------------------------
 
@@ -2547,10 +2547,9 @@ async function testBackgroundReminder() {
   const res = await reply;
 
   if (!res) { toast(nl ? 'Geen reactie van de achtergrond-worker' : 'No response from the background worker'); return; }
-  if (res.shown) toast(nl ? 'Achtergrondmelding werkt ✓' : 'Background reminder works ✓');
-  else if (!res.hasDigest) toast(nl ? 'Nog geen zorggegevens — open eerst een plant' : 'No care data yet — open a plant first');
-  else if (res.dueCount === 0) toast(nl ? 'Er staat nu niets te doen' : 'Nothing needs care right now');
-  else toast(nl ? 'De melding kon niet worden getoond' : 'Could not show the notification');
+  if (res.shown && res.sample) toast(nl ? 'Werkt ✓ — voorbeeld (er staat nu niets echt te doen)' : 'Works ✓ — sample (nothing is actually due now)');
+  else if (res.shown) toast(nl ? 'Achtergrondmelding werkt ✓' : 'Background reminder works ✓');
+  else toast(nl ? 'De melding kon niet worden getoond — controleer of meldingen voor de app aanstaan' : 'Couldn’t show it — check the app’s notifications are allowed in Android settings');
 }
 
 // A stable local-date key (YYYY-M-D) used to send each plant/task at most one

@@ -3,7 +3,7 @@
 // Strategy: cache-first for the app shell (it's fully static), so the app
 // opens instantly and works with no network. Bump CACHE when files change.
 
-const CACHE = 'plant-tracker-v50';
+const CACHE = 'plant-tracker-v51';
 
 const ASSETS = [
   './',
@@ -198,42 +198,68 @@ async function runSeasonalNudges(digest, now) {
 }
 
 // Returns a small summary so the "Test background reminder" button can tell the
-// user what happened: { hasDigest, dueCount, shown }.
-// opts.force (test only): skip the seasonal nudges and the once-per-day de-dup —
-// and don't touch notifyLog — so a test never fires early, consumes the yearly
-// seasonal quota, or suppresses the real reminder later today.
+// user what happened: { hasDigest, dueCount, shown, sample }.
+//
+// opts.force (test only): ALWAYS put a notification on screen — a sample one if
+// nothing is actually due — so the user can confirm the background worker can
+// display notifications on this device, which is the whole point of the test.
+// It also skips the seasonal nudges and the once-per-day de-dup, and never
+// touches notifyLog, so a test can't fire early, consume the yearly seasonal
+// quota, or suppress the real reminder later today.
 async function runDailyReminderCheck(opts = {}) {
   const force = !!opts.force;
   const digest = await idbGetMeta('reminderDigest');
-  if (!digest) return { hasDigest: false, dueCount: 0, shown: false };
   const now = new Date();
-  if (!force) await runSeasonalNudges(digest, now);
-  if (!Array.isArray(digest.tasks)) return { hasDigest: true, dueCount: 0, shown: false };
-  const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
-  // Due today or overdue.
-  const due = digest.tasks.filter((t) => {
-    const d = new Date(t.due); d.setHours(0, 0, 0, 0);
-    return d.getTime() <= startToday.getTime();
-  });
-  if (!due.length) {
-    if (!force) await idbPutMeta('notifyLog', {});
-    return { hasDigest: true, dueCount: 0, shown: false };
+  const lang = (digest && digest.lang) || 'en';
+
+  // What's genuinely due today or overdue, per the last digest the app wrote.
+  let due = [];
+  if (digest && Array.isArray(digest.tasks)) {
+    const startToday = new Date(now); startToday.setHours(0, 0, 0, 0);
+    due = digest.tasks.filter((t) => {
+      const d = new Date(t.due); d.setHours(0, 0, 0, 0);
+      return d.getTime() <= startToday.getTime();
+    });
   }
+
+  if (force) {
+    // Show the real due list if there is one; otherwise a friendly sample so the
+    // test still proves the SW → notification path works end to end.
+    const list = due.length ? due : [{
+      plantId: 'sample',
+      name: lang === 'nl' ? 'Voorbeeldplant' : 'Sample plant',
+      type: 'water',
+      due: new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    }];
+    const msg = formatReminder(list, now, lang);
+    if (!msg) return { hasDigest: !!digest, dueCount: due.length, shown: false };
+    try {
+      await self.registration.showNotification(msg.title, {
+        body: msg.body, tag: 'plant-care-daily', icon: './icons/icon-192.png', badge: './icons/icon-192.png',
+      });
+      return { hasDigest: !!digest, dueCount: due.length, shown: true, sample: !due.length };
+    } catch {
+      return { hasDigest: !!digest, dueCount: due.length, shown: false };
+    }
+  }
+
+  // ---- Normal (Chrome-scheduled) path ----
+  if (!digest) return { hasDigest: false, dueCount: 0, shown: false };
+  await runSeasonalNudges(digest, now);
+  if (!Array.isArray(digest.tasks)) return { hasDigest: true, dueCount: 0, shown: false };
+  if (!due.length) { await idbPutMeta('notifyLog', {}); return { hasDigest: true, dueCount: 0, shown: false }; }
 
   // Once-per-day de-dup, shared with the in-app notifier so the two never
-  // double-fire for the same plant on the same day. A forced test bypasses it.
-  let fresh = due;
-  if (!force) {
-    const today = reminderDayKey(now);
-    const log = (await idbGetMeta('notifyLog')) || {};
-    fresh = due.filter((t) => log[`${t.plantId}|${t.type}`] !== today);
-    const newLog = {};
-    for (const t of due) newLog[`${t.plantId}|${t.type}`] = today;
-    await idbPutMeta('notifyLog', newLog);
-    if (!fresh.length) return { hasDigest: true, dueCount: due.length, shown: false };
-  }
+  // double-fire for the same plant on the same day.
+  const today = reminderDayKey(now);
+  const log = (await idbGetMeta('notifyLog')) || {};
+  const fresh = due.filter((t) => log[`${t.plantId}|${t.type}`] !== today);
+  const newLog = {};
+  for (const t of due) newLog[`${t.plantId}|${t.type}`] = today;
+  await idbPutMeta('notifyLog', newLog);
+  if (!fresh.length) return { hasDigest: true, dueCount: due.length, shown: false };
 
-  const msg = formatReminder(fresh, now, digest.lang || 'en');
+  const msg = formatReminder(fresh, now, lang);
   if (!msg) return { hasDigest: true, dueCount: due.length, shown: false };
   await self.registration.showNotification(msg.title, {
     body: msg.body,
